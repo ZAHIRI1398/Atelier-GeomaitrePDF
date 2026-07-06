@@ -31,13 +31,14 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
 
-type Tool = 'reader' | 'select' | 'line' | 'parallel' | 'perpendicular' | 'ruler' | 'compass' | 'setSquare' | 'protractor' | 'point' | 'text' | 'eraser'
+type Tool = 'reader' | 'select' | 'line' | 'segment' | 'midpoint' | 'parallel' | 'perpendicular' | 'ruler' | 'compass' | 'setSquare' | 'protractor' | 'point' | 'text' | 'eraser'
 
 type PdfWord = { id: string; text: string; x: number; y: number; w: number; h: number; line: number }
 type ReaderBox = { x1: number; y1: number; x2: number; y2: number }
 
 type Shape =
   | { id: string; type: 'line'; x1: number; y1: number; x2: number; y2: number; color: string; width: number; label: string }
+  | { id: string; type: 'segment'; x1: number; y1: number; x2: number; y2: number; color: string; width: number; label: string }
   | { id: string; type: 'circle'; cx: number; cy: number; r: number; color: string; width: number; label: string }
   | { id: string; type: 'triangle'; x: number; y: number; w: number; h: number; color: string; width: number; label: string }
   | { id: string; type: 'angle'; cx: number; cy: number; angle: number; radius: number; color: string; width: number; label: string }
@@ -48,6 +49,8 @@ const tools: Array<{ id: Tool; name: string; hint: string; icon: typeof MousePoi
   { id: 'reader', name: 'Lecture', hint: 'Lire un mot ou une phrase du PDF', icon: BookOpenText },
   { id: 'select', name: 'Sélection', hint: 'Déplacer et inspecter', icon: MousePointer2 },
   { id: 'line', name: 'Droite', hint: 'Construire une droite infinie', icon: Minus },
+  { id: 'segment', name: 'Segment', hint: 'Tracer un segment entre deux points', icon: Minus },
+  { id: 'midpoint', name: 'Milieu', hint: 'Trouver le milieu d\'un segment', icon: Sigma },
   { id: 'parallel', name: 'Parallèle', hint: 'Droite parallèle à une droite passant par un point', icon: Rows3 },
   { id: 'perpendicular', name: 'Perpendiculaire', hint: 'Droite perpendiculaire à une droite passant par un point', icon: CornerDownRight },
   { id: 'ruler', name: 'Latte', hint: 'Tracer une droite mesurée', icon: Ruler },
@@ -419,14 +422,24 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, selected = false
     const midY = (shape.y1 + shape.y2) / 2
     ctx.translate(midX, midY)
     ctx.rotate(angle)
-    ctx.font = '600 16px Inter, system-ui'
-    ctx.fillStyle = shape.color
-    ctx.fillText(shape.label, 10, -10)
     ctx.beginPath()
     ctx.moveTo(shape.x2 - midX - 12, shape.y2 - midY - 5)
     ctx.lineTo(shape.x2 - midX, shape.y2 - midY)
     ctx.lineTo(shape.x2 - midX - 12, shape.y2 - midY + 5)
     ctx.stroke()
+  }
+
+  if (shape.type === 'segment') {
+    ctx.lineWidth = shape.width
+    ctx.beginPath()
+    ctx.moveTo(shape.x1, shape.y1)
+    ctx.lineTo(shape.x2, shape.y2)
+    ctx.stroke()
+    // Draw endpoints
+    ctx.beginPath()
+    ctx.arc(shape.x1, shape.y1, 4, 0, Math.PI * 2)
+    ctx.arc(shape.x2, shape.y2, 4, 0, Math.PI * 2)
+    ctx.fill()
   }
 
   if (shape.type === 'circle') {
@@ -503,6 +516,7 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, selected = false
 
 function hitTest(shape: Shape, x: number, y: number) {
   if (shape.type === 'line') return lineDistance(x, y, shape.x1, shape.y1, shape.x2, shape.y2) < 12
+  if (shape.type === 'segment') return lineDistance(x, y, shape.x1, shape.y1, shape.x2, shape.y2) < 12
   if (shape.type === 'circle') return Math.abs(distance(x, y, shape.cx, shape.cy) - Math.abs(shape.r)) < 12 || distance(x, y, shape.cx, shape.cy) < 10
   if (shape.type === 'triangle') {
     const minX = Math.min(shape.x, shape.x + shape.w)
@@ -567,13 +581,19 @@ function App() {
   const makeShape = useCallback(
     (start: { x: number; y: number }, end: { x: number; y: number }): Shape | null => {
       const id = crypto.randomUUID()
-      if (tool === 'ruler' || tool === 'line') {
+      if (tool === 'ruler' || tool === 'line' || tool === 'segment') {
         const cm = distance(start.x, start.y, end.x, end.y) / pxPerCm
         if (tool === 'line') {
           const angle = Math.atan2(end.y - start.y, end.x - start.x)
-          return lineThroughPoint(start, angle, stage, color, strokeWidth, 'droite')
+          return lineThroughPoint(start, angle, stage, color, strokeWidth, '')
         }
-        return { id, type: 'line', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: `${cm.toFixed(1)} cm` }
+        if (tool === 'segment') {
+          return { id, type: 'segment', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
+        }
+        return { id, type: 'line', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
+      }
+      if (tool === 'ruler') {
+        return { id, type: 'line', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
       }
       if (tool === 'compass') {
         const measuredRadius = distance(start.x, start.y, end.x, end.y)
@@ -708,8 +728,7 @@ function App() {
   const makeRelatedLine = (base: Extract<Shape, { type: 'line' }>, point: { x: number; y: number }, relation: 'parallel' | 'perpendicular') => {
     const baseAngle = Math.atan2(base.y2 - base.y1, base.x2 - base.x1)
     const angle = relation === 'parallel' ? baseAngle : baseAngle + Math.PI / 2
-    const label = relation === 'parallel' ? '// parallèle' : '⊥ perpendiculaire'
-    return lineThroughPoint(point, angle, stage, color, strokeWidth, label)
+    return lineThroughPoint(point, angle, stage, color, strokeWidth, '')
   }
 
   const speak = (text = readerText) => {
@@ -793,6 +812,18 @@ function App() {
       }
       return
     }
+    if (tool === 'midpoint') {
+      const segment = [...shapes].reverse().find((shape): shape is Extract<Shape, { type: 'segment' }> => shape.type === 'segment' && lineDistance(pos.x, pos.y, shape.x1, shape.y1, shape.x2, shape.y2) < 12)
+      if (segment) {
+        const midX = (segment.x1 + segment.x2) / 2
+        const midY = (segment.y1 + segment.y2) / 2
+        setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: midX, y: midY, color, label: pointLabel }])
+        setMessage(`Milieu du segment marqué au point ${pointLabel}.`)
+      } else {
+        setMessage('Cliquez sur un segment existant pour trouver son milieu.')
+      }
+      return
+    }
     if (tool === 'point') {
       setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: pos.x, y: pos.y, color, label: pointLabel }])
       return
@@ -840,10 +871,13 @@ function App() {
         items.map((shape) => {
           if (shape.id !== moving.id) return shape
           if (shape.type === 'line') return { ...shape, x1: shape.x1 + dx, y1: shape.y1 + dy, x2: shape.x2 + dx, y2: shape.y2 + dy }
+          if (shape.type === 'segment') return { ...shape, x1: shape.x1 + dx, y1: shape.y1 + dy, x2: shape.x2 + dx, y2: shape.y2 + dy }
           if (shape.type === 'circle') return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
           if (shape.type === 'triangle') return { ...shape, x: shape.x + dx, y: shape.y + dy }
           if (shape.type === 'angle') return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
-          return { ...shape, x: shape.x + dx, y: shape.y + dy }
+          if (shape.type === 'point') return { ...shape, x: shape.x + dx, y: shape.y + dy }
+          if (shape.type === 'text') return { ...shape, x: shape.x + dx, y: shape.y + dy }
+          return shape
         }),
       )
       return
@@ -880,7 +914,7 @@ function App() {
       return
     }
     if (preview) {
-      const valid = preview.type === 'line' ? distance(preview.x1, preview.y1, preview.x2, preview.y2) > 8 : preview.type === 'circle' ? preview.r > 8 : preview.type === 'triangle' ? Math.abs(preview.w) > 12 && Math.abs(preview.h) > 12 : true
+      const valid = preview.type === 'line' ? distance(preview.x1, preview.y1, preview.x2, preview.y2) > 8 : preview.type === 'segment' ? distance(preview.x1, preview.y1, preview.x2, preview.y2) > 8 : preview.type === 'circle' ? preview.r > 8 : preview.type === 'triangle' ? Math.abs(preview.w) > 12 && Math.abs(preview.h) > 12 : true
       if (valid) setShapes((items) => [...items, preview])
     }
     setPreview(null)
@@ -942,17 +976,18 @@ function App() {
         <aside className="space-y-4">
           <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-black/20 backdrop-blur">
             <h2 className="mb-3 font-black text-white">Instruments</h2>
-            <div className="grid grid-cols-2 gap-2">
-              {tools.map((item) => {
-                const Icon = item.icon
-                return (
-                  <button key={item.id} onClick={() => setTool(item.id)} className={`rounded-2xl border p-3 text-left transition ${tool === item.id ? 'border-blue-300 bg-blue-500 text-white' : 'border-white/10 bg-slate-900/70 text-slate-300 hover:bg-slate-800'}`} title={item.hint}>
-                    <Icon className="mb-2 h-5 w-5" />
-                    <span className="block text-sm font-bold">{item.name}</span>
-                  </button>
-                )
-              })}
-            </div>
+            <select 
+              value={tool} 
+              onChange={(e) => setTool(e.target.value as Tool)}
+              className="w-full rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-slate-300 hover:bg-slate-800 focus:border-blue-300 focus:outline-none"
+            >
+              {tools.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-slate-400">{tools.find((t) => t.id === tool)?.hint}</p>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-black/20 backdrop-blur">
@@ -1039,6 +1074,8 @@ function App() {
               <p className="text-sm text-slate-400">Outil actif : <span className="text-blue-300">{tools.find((t) => t.id === tool)?.name}</span> · Objets : {shapes.length}</p>
               {tool === 'reader' && <p className="mt-1 text-sm font-semibold text-yellow-200">Lecture dyslexie : cliquez un mot, ou glissez autour d'une phrase/zone, puis l'application lit à voix haute.</p>}
               {tool === 'line' && <p className="mt-1 text-sm font-semibold text-slate-200">Droite : glissez pour définir sa direction, elle sera prolongée sur toute la page.</p>}
+              {tool === 'segment' && <p className="mt-1 text-sm font-semibold text-slate-200">Segment : cliquez sur le premier point, glissez jusqu'au deuxième point pour tracer un segment mesuré.</p>}
+              {tool === 'midpoint' && <p className="mt-1 text-sm font-semibold text-slate-200">Milieu : cliquez sur un segment existant pour marquer automatiquement son milieu.</p>}
               {tool === 'parallel' && <p className="mt-1 text-sm font-semibold text-emerald-200">Parallèle : 1) cliquez une droite de base, 2) cliquez le point par lequel la parallèle doit passer.</p>}
               {tool === 'perpendicular' && <p className="mt-1 text-sm font-semibold text-red-200">Perpendiculaire : 1) cliquez une droite de base, 2) cliquez le point par lequel la perpendiculaire doit passer.</p>}
               {tool === 'compass' && <p className="mt-1 text-sm font-semibold text-blue-200">Pointe sèche = premier clic. Mine = déplacement. Ouverture actuelle : {compassOpeningCm.toFixed(1)} cm.</p>}
