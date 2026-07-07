@@ -298,7 +298,7 @@ function drawRulerInstrument(ctx: CanvasRenderingContext2D, start: { x: number; 
   ctx.restore()
 }
 
-function drawSetSquareInstrument(ctx: CanvasRenderingContext2D, start: { x: number; y: number }, end: { x: number; y: number }) {
+function drawSetSquareInstrument(ctx: CanvasRenderingContext2D, start: { x: number; y: number }, end: { x: number; y: number }, rotation: number = 0) {
   const w = end.x - start.x
   const h = end.y - start.y
   if (Math.abs(w) < 12 || Math.abs(h) < 12) return
@@ -306,6 +306,9 @@ function drawSetSquareInstrument(ctx: CanvasRenderingContext2D, start: { x: numb
   const sy = Math.sign(h) || 1
   const inner = Math.min(Math.abs(w), Math.abs(h)) * 0.34
   ctx.save()
+  ctx.translate(start.x, start.y)
+  ctx.rotate(rotation)
+  ctx.translate(-start.x, -start.y)
   ctx.shadowColor = 'rgba(15, 23, 42, .18)'
   ctx.shadowBlur = 10
   ctx.fillStyle = 'rgba(14, 165, 233, .18)'
@@ -343,12 +346,15 @@ function drawSetSquareInstrument(ctx: CanvasRenderingContext2D, start: { x: numb
   ctx.restore()
 }
 
-function drawProtractorInstrument(ctx: CanvasRenderingContext2D, center: { x: number; y: number }, pointer: { x: number; y: number }, fixedAngle: number | null) {
+function drawProtractorInstrument(ctx: CanvasRenderingContext2D, center: { x: number; y: number }, pointer: { x: number; y: number }, fixedAngle: number | null, rotation: number = 0) {
   const radius = Math.max(105, Math.min(210, distance(center.x, center.y, pointer.x, pointer.y)))
   const raw = Math.atan2(pointer.y - center.y, pointer.x - center.x)
   const angle = fixedAngle === null ? raw : (-fixedAngle * Math.PI) / 180
   const degrees = Math.round(Math.abs((angle * 180) / Math.PI))
   ctx.save()
+  ctx.translate(center.x, center.y)
+  ctx.rotate(rotation)
+  ctx.translate(-center.x, -center.y)
   ctx.shadowColor = 'rgba(15, 23, 42, .18)'
   ctx.shadowBlur = 10
   ctx.fillStyle = 'rgba(168, 85, 247, .16)'
@@ -563,6 +569,8 @@ function App() {
   const [useFixedCompass, setUseFixedCompass] = useState(false)
   const [protractorAngle, setProtractorAngle] = useState(60)
   const [useFixedProtractor, setUseFixedProtractor] = useState(false)
+  const [setSquareRotation, setSetSquareRotation] = useState(0)
+  const [protractorRotation, setProtractorRotation] = useState(0)
   const [showGrid, setShowGrid] = useState(true)
   const [zoom, setZoom] = useState(0.82)
   const [message, setMessage] = useState('Importez un PDF ou commencez sur une feuille blanche A4.')
@@ -632,8 +640,8 @@ function App() {
         if (base?.type === 'line') drawShape(ctx, base, true)
       }
       if (tool === 'ruler' && dragStart && toolPointer) drawRulerInstrument(ctx, dragStart, toolPointer, pxPerCm)
-      if (tool === 'setSquare' && dragStart && toolPointer) drawSetSquareInstrument(ctx, dragStart, toolPointer)
-      if (tool === 'protractor' && dragStart && toolPointer) drawProtractorInstrument(ctx, dragStart, toolPointer, useFixedProtractor ? protractorAngle : null)
+      if (tool === 'setSquare' && dragStart && toolPointer) drawSetSquareInstrument(ctx, dragStart, toolPointer, setSquareRotation)
+      if (tool === 'protractor' && dragStart && toolPointer) drawProtractorInstrument(ctx, dragStart, toolPointer, useFixedProtractor ? protractorAngle : null, protractorRotation)
       if (tool === 'compass' && dragStart && preview?.type === 'circle') {
         const pointer = compassPointer ?? { x: dragStart.x + preview.r, y: dragStart.y }
         const currentAngle = Math.atan2(pointer.y - dragStart.y, pointer.x - dragStart.x)
@@ -657,6 +665,32 @@ function App() {
   useEffect(() => {
     redraw()
   }, [redraw])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const rotationStep = e.shiftKey ? 0.25 : 0.05
+      if (tool === 'setSquare') {
+        if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
+          e.preventDefault()
+          setSetSquareRotation((r) => r - rotationStep)
+        } else if (e.key === 'ArrowRight' || e.key === 'e' || e.key === 'E') {
+          e.preventDefault()
+          setSetSquareRotation((r) => r + rotationStep)
+        }
+      }
+      if (tool === 'protractor') {
+        if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
+          e.preventDefault()
+          setProtractorRotation((r) => r - rotationStep)
+        } else if (e.key === 'ArrowRight' || e.key === 'e' || e.key === 'E') {
+          e.preventDefault()
+          setProtractorRotation((r) => r + rotationStep)
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [tool])
 
   const renderPage = useCallback(async (pdf: pdfjsLib.PDFDocumentProxy, pageNumber: number) => {
     const pdfPage = await pdf.getPage(pageNumber)
@@ -1077,8 +1111,8 @@ function App() {
               {tool === 'perpendicular' && <p className="mt-1 text-sm font-semibold text-red-200">Perpendiculaire : 1) cliquez une droite de base, 2) cliquez le point par lequel la perpendiculaire doit passer.</p>}
               {tool === 'compass' && <p className="mt-1 text-sm font-semibold text-blue-200">Pointe sèche = premier clic. Mine = déplacement. Ouverture actuelle : {compassOpeningCm.toFixed(1)} cm.</p>}
               {tool === 'ruler' && <p className="mt-1 text-sm font-semibold text-amber-200">Latte graduée : glissez pour aligner la règle et tracer un segment mesuré.</p>}
-              {tool === 'setSquare' && <p className="mt-1 text-sm font-semibold text-sky-200">Équerre : glissez pour poser le triangle transparent et construire un angle droit.</p>}
-              {tool === 'protractor' && <p className="mt-1 text-sm font-semibold text-purple-200">Rapporteur : centre au premier clic, glissez pour mesurer/construire l'angle. Angle actuel : {protractorAngle}°.</p>}
+              {tool === 'setSquare' && <p className="mt-1 text-sm font-semibold text-sky-200">Équerre : glissez pour poser le triangle transparent. Utilisez ←/→ ou Q/E pour tourner (Shift pour rotation rapide).</p>}
+              {tool === 'protractor' && <p className="mt-1 text-sm font-semibold text-purple-200">Rapporteur : centre au premier clic, glissez pour mesurer/construire l'angle. Utilisez ←/→ ou Q/E pour tourner (Shift pour rotation rapide). Angle actuel : {protractorAngle}°.</p>}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={() => speak()} className="rounded-xl bg-yellow-500 px-3 py-2 font-bold text-slate-950 hover:bg-yellow-400"><Volume2 className="inline h-5 w-5" /> Lire</button>
