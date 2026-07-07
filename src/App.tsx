@@ -592,9 +592,6 @@ function App() {
         }
         return { id, type: 'line', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
       }
-      if (tool === 'ruler') {
-        return { id, type: 'line', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
-      }
       if (tool === 'compass') {
         const measuredRadius = distance(start.x, start.y, end.x, end.y)
         const r = useFixedCompass ? compassOpeningCm * pxPerCm : measuredRadius
