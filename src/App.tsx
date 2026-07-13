@@ -591,6 +591,9 @@ function App() {
       const id = crypto.randomUUID()
       if (tool === 'ruler' || tool === 'line' || tool === 'segment') {
         const cm = distance(start.x, start.y, end.x, end.y) / pxPerCm
+        if (tool === 'ruler') {
+          return { id, type: 'segment', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: `${cm.toFixed(1)} cm` }
+        }
         if (tool === 'line') {
           const angle = Math.atan2(end.y - start.y, end.x - start.x)
           return lineThroughPoint(start, angle, stage, color, strokeWidth, '')
@@ -636,8 +639,8 @@ function App() {
       shapes.forEach((shape) => drawShape(ctx, shape, shape.id === selectedId))
       if (preview) drawShape(ctx, preview)
       if ((tool === 'parallel' || tool === 'perpendicular') && constructionBaseId) {
-        const base = shapes.find((shape) => shape.id === constructionBaseId && shape.type === 'line')
-        if (base?.type === 'line') drawShape(ctx, base, true)
+        const base = shapes.find((shape) => shape.id === constructionBaseId && (shape.type === 'line' || shape.type === 'segment'))
+        if (base) drawShape(ctx, base, true)
       }
       if (tool === 'ruler' && dragStart && toolPointer) drawRulerInstrument(ctx, dragStart, toolPointer, pxPerCm)
       if (tool === 'setSquare' && dragStart && toolPointer) drawSetSquareInstrument(ctx, dragStart, toolPointer, setSquareRotation)
@@ -756,7 +759,7 @@ function App() {
     await renderPage(doc, valid)
   }
 
-  const makeRelatedLine = (base: Extract<Shape, { type: 'line' }>, point: { x: number; y: number }, relation: 'parallel' | 'perpendicular') => {
+  const makeRelatedLine = (base: Extract<Shape, { type: 'line' } | { type: 'segment' }>, point: { x: number; y: number }, relation: 'parallel' | 'perpendicular') => {
     const baseAngle = Math.atan2(base.y2 - base.y1, base.x2 - base.x1)
     const angle = relation === 'parallel' ? baseAngle : baseAngle + Math.PI / 2
     return lineThroughPoint(point, angle, stage, color, strokeWidth, '')
@@ -822,35 +825,40 @@ function App() {
     }
     if (tool === 'parallel' || tool === 'perpendicular') {
       if (!constructionBaseId) {
-        const base = [...shapes].reverse().find((shape): shape is Extract<Shape, { type: 'line' }> => shape.type === 'line' && infiniteLineDistance(pos.x, pos.y, shape.x1, shape.y1, shape.x2, shape.y2) < 16)
+        const base = [...shapes]
+          .reverse()
+          .find((shape): shape is Extract<Shape, { type: 'line' } | { type: 'segment' }> =>
+            (shape.type === 'line' && infiniteLineDistance(pos.x, pos.y, shape.x1, shape.y1, shape.x2, shape.y2) < 16) ||
+            (shape.type === 'segment' && lineDistance(pos.x, pos.y, shape.x1, shape.y1, shape.x2, shape.y2) < 12),
+          )
         if (base) {
           setConstructionBaseId(base.id)
           setSelectedId(base.id)
           setMessage(`Droite de base sélectionnée. Cliquez maintenant sur le point de passage pour tracer la ${tool === 'parallel' ? 'parallèle' : 'perpendiculaire'}.`)
         } else {
-          setMessage('Cliquez d’abord sur une droite existante. Astuce : utilisez l’outil “Droite” pour créer une droite de base.')
+          setMessage('Cliquez d’abord sur une droite ou un segment existant. Astuce : utilisez l’outil “Droite” ou “Latte” pour créer une base.')
         }
         return
       }
-      const base = shapes.find((shape): shape is Extract<Shape, { type: 'line' }> => shape.id === constructionBaseId && shape.type === 'line')
+      const base = shapes.find((shape): shape is Extract<Shape, { type: 'line' } | { type: 'segment' }> => shape.id === constructionBaseId && (shape.type === 'line' || shape.type === 'segment'))
       if (base) {
         const related = makeRelatedLine(base, pos, tool)
-        setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: pos.x, y: pos.y, color, label: pointLabel }, related])
+        setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: pos.x, y: pos.y, color, label: '' }, related])
         setPreview(null)
         setConstructionBaseId(null)
         setSelectedId(null)
-        setMessage(`${tool === 'parallel' ? 'Parallèle' : 'Perpendiculaire'} construite par le point ${pointLabel}.`)
+        setMessage(`${tool === 'parallel' ? 'Parallèle' : 'Perpendiculaire'} construite.`)
       }
       return
     }
     if (tool === 'midpoint') {
       const segment = [...shapes].reverse().find((shape): shape is Extract<Shape, { type: 'segment' }> => shape.type === 'segment' && lineDistance(pos.x, pos.y, shape.x1, shape.y1, shape.x2, shape.y2) < 12)
-      if (segment) {
-        const midX = (segment.x1 + segment.x2) / 2
-        const midY = (segment.y1 + segment.y2) / 2
-        setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: midX, y: midY, color, label: pointLabel }])
-        setMessage(`Milieu du segment marqué au point ${pointLabel}.`)
-      } else {
+        if (segment) {
+          const midX = (segment.x1 + segment.x2) / 2
+          const midY = (segment.y1 + segment.y2) / 2
+          setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: midX, y: midY, color, label: '' }])
+          setMessage('Milieu du segment marqué.')
+        } else {
         setMessage('Cliquez sur un segment existant pour trouver son milieu.')
       }
       return
@@ -890,7 +898,7 @@ function App() {
       return
     }
     if ((tool === 'parallel' || tool === 'perpendicular') && constructionBaseId) {
-      const base = shapes.find((shape): shape is Extract<Shape, { type: 'line' }> => shape.id === constructionBaseId && shape.type === 'line')
+      const base = shapes.find((shape): shape is Extract<Shape, { type: 'line' } | { type: 'segment' }> => shape.id === constructionBaseId && (shape.type === 'line' || shape.type === 'segment'))
       if (base) setPreview(makeRelatedLine(base, pos, tool))
       return
     }
