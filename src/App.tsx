@@ -828,6 +828,14 @@ function App() {
   const chooseReaderWords = (pos: { x: number; y: number }) => {
     const word = pdfWords.find((item) => pos.x >= item.x - 4 && pos.x <= item.x + item.w + 4 && pos.y >= item.y - 4 && pos.y <= item.y + item.h + 4)
     if (!word) {
+      const textShape = [...shapes].reverse().find((shape): shape is Extract<Shape, { type: 'text' }> => shape.type === 'text' && pos.x >= shape.x && pos.x <= shape.x + shape.text.length * shape.size * 0.65 && pos.y <= shape.y && pos.y >= shape.y - shape.size)
+      if (textShape) {
+        setSelectedWordIds([])
+        setReaderText(textShape.text)
+        setMessage(`Texte sélectionné : “${textShape.text}”.`)
+        speak(textShape.text)
+        return
+      }
       setSelectedWordIds([])
       setReaderText('')
       setMessage('Aucun mot détecté ici. Essayez de cliquer au centre du mot ou sélectionnez une zone.')
@@ -843,7 +851,11 @@ function App() {
 
   const chooseReaderBox = (box: ReaderBox) => {
     const chosen = pdfWords.filter((word) => boxesIntersect(word, box)).sort((a, b) => a.line === b.line ? a.x - b.x : a.line - b.line)
-    const text = chosen.map((word) => word.text).join(' ')
+    let text = chosen.map((word) => word.text).join(' ')
+    if (!text) {
+      const texts = [...shapes].reverse().filter((shape): shape is Extract<Shape, { type: 'text' }> => shape.type === 'text' && boxesIntersect({ x: shape.x, y: shape.y - shape.size, w: shape.text.length * shape.size * 0.65, h: shape.size }, box))
+      text = texts.map((shape) => shape.text).join(' ')
+    }
     setSelectedWordIds(chosen.map((word) => word.id))
     setReaderText(text)
     if (text) {
