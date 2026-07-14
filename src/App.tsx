@@ -603,36 +603,41 @@ function App() {
   const makeShape = useCallback(
     (start: { x: number; y: number }, end: { x: number; y: number }): Shape | null => {
       const id = crypto.randomUUID()
-      if (tool === 'ruler' || tool === 'line' || tool === 'segment') {
-        const cm = distance(start.x, start.y, end.x, end.y) / pxPerCm
-        if (tool === 'ruler') {
-          return { id, type: 'segment', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: `${cm.toFixed(1)} cm` }
+      switch (tool) {
+        case 'ruler':
+        case 'line':
+        case 'segment': {
+          const cm = distance(start.x, start.y, end.x, end.y) / pxPerCm
+          if (tool === 'ruler') {
+            return { id, type: 'segment', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: `${cm.toFixed(1)} cm` }
+          }
+          if (tool === 'line') {
+            const angle = Math.atan2(end.y - start.y, end.x - start.x)
+            return lineThroughPoint(start, angle, stage, color, strokeWidth, '')
+          }
+          if (tool === 'segment') {
+            return { id, type: 'segment', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
+          }
+          return { id, type: 'line', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
         }
-        if (tool === 'line') {
-          const angle = Math.atan2(end.y - start.y, end.x - start.x)
-          return lineThroughPoint(start, angle, stage, color, strokeWidth, '')
+        case 'compass': {
+          const measuredRadius = distance(start.x, start.y, end.x, end.y)
+          const r = useFixedCompass ? compassOpeningCm * pxPerCm : measuredRadius
+          return { id, type: 'circle', cx: start.x, cy: start.y, r, color, width: strokeWidth, label: `r = ${(r / pxPerCm).toFixed(1)} cm` }
         }
-        if (tool === 'segment') {
-          return { id, type: 'segment', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
+        case 'setSquare': {
+          return { id, type: 'triangle', x: start.x, y: start.y, w: end.x - start.x, h: end.y - start.y, color, width: strokeWidth, label: '90°' }
         }
-        return { id, type: 'line', x1: start.x, y1: start.y, x2: end.x, y2: end.y, color, width: strokeWidth, label: '' }
+        case 'protractor': {
+          const measuredAngle = Math.atan2(end.y - start.y, end.x - start.x)
+          const angle = useFixedProtractor ? (-protractorAngle * Math.PI) / 180 : measuredAngle
+          const radius = useFixedProtractor ? 130 : Math.max(70, distance(start.x, start.y, end.x, end.y))
+          const degrees = Math.min(180, Math.round(Math.abs((angle * 180) / Math.PI)))
+          return { id, type: 'angle', cx: start.x, cy: start.y, angle, radius, color, width: strokeWidth, label: `${degrees}°` }
+        }
+        default:
+          return null
       }
-      if (tool === 'compass') {
-        const measuredRadius = distance(start.x, start.y, end.x, end.y)
-        const r = useFixedCompass ? compassOpeningCm * pxPerCm : measuredRadius
-        return { id, type: 'circle', cx: start.x, cy: start.y, r, color, width: strokeWidth, label: `r = ${(r / pxPerCm).toFixed(1)} cm` }
-      }
-      if (tool === 'setSquare') {
-        return { id, type: 'triangle', x: start.x, y: start.y, w: end.x - start.x, h: end.y - start.y, color, width: strokeWidth, label: '90°' }
-      }
-      if (tool === 'protractor') {
-        const measuredAngle = Math.atan2(end.y - start.y, end.x - start.x)
-        const angle = useFixedProtractor ? (-protractorAngle * Math.PI) / 180 : measuredAngle
-        const radius = useFixedProtractor ? 130 : Math.max(70, distance(start.x, start.y, end.x, end.y))
-        const degrees = Math.min(180, Math.round(Math.abs((angle * 180) / Math.PI)))
-        return { id, type: 'angle', cx: start.x, cy: start.y, angle, radius, color, width: strokeWidth, label: `${degrees}°` }
-      }
-      return null
     },
     [color, compassOpeningCm, protractorAngle, pxPerCm, stage, strokeWidth, tool, useFixedCompass, useFixedProtractor],
   )
@@ -989,13 +994,18 @@ function App() {
     }
     setDragStart(pos)
     let end = pos
+    // Handle compass-specific logic
     if (tool === 'compass') {
       if (useFixedCompass) {
         end = { x: pos.x + compassOpeningCm * pxPerCm, y: pos.y }
       }
       setCompassPointer(end)
-    } else if (tool === 'protractor' && useFixedProtractor) {
-      end = { x: pos.x + Math.cos((-protractorAngle * Math.PI) / 180) * 130, y: pos.y + Math.sin((-protractorAngle * Math.PI) / 180) * 130 }
+    }
+    // Handle protractor-specific logic  
+    if ((tool as Tool) === 'protractor') {
+      if (useFixedProtractor) {
+        end = { x: pos.x + Math.cos((-protractorAngle * Math.PI) / 180) * 130, y: pos.y + Math.sin((-protractorAngle * Math.PI) / 180) * 130 }
+      }
     }
     setToolPointer(end)
     const created = makeShape(pos, end)
