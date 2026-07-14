@@ -583,8 +583,6 @@ function App() {
   const [useFixedProtractor, setUseFixedProtractor] = useState(false)
   const [setSquareRotation, setSetSquareRotation] = useState(0)
   const [protractorRotation, setProtractorRotation] = useState(0)
-  const [activeProtractor, setActiveProtractor] = useState<{ x: number; y: number } | null>(null)
-  const [activeSetSquare, setActiveSetSquare] = useState<{ x: number; y: number } | null>(null)
   const [showGrid, setShowGrid] = useState(true)
   const [zoom, setZoom] = useState(0.82)
   const [message, setMessage] = useState('Importez un PDF ou commencez sur une feuille blanche A4.')
@@ -662,14 +660,8 @@ function App() {
         if (base) drawShape(ctx, base, true)
       }
       if (tool === 'ruler' && dragStart && toolPointer) drawRulerInstrument(ctx, dragStart, toolPointer, pxPerCm)
-      if (tool === 'setSquare') {
-        if (dragStart && toolPointer) drawSetSquareInstrument(ctx, dragStart, toolPointer, setSquareRotation)
-        else if (activeSetSquare && toolPointer) drawSetSquareInstrument(ctx, { x: activeSetSquare.x, y: activeSetSquare.y }, toolPointer, setSquareRotation)
-      }
-      if (tool === 'protractor') {
-        if (dragStart && toolPointer) drawProtractorInstrument(ctx, dragStart, toolPointer, useFixedProtractor ? protractorAngle : null, protractorRotation)
-        else if (activeProtractor && toolPointer) drawProtractorInstrument(ctx, { x: activeProtractor.x, y: activeProtractor.y }, toolPointer, useFixedProtractor ? protractorAngle : null, protractorRotation)
-      }
+      if (tool === 'setSquare' && dragStart && toolPointer) drawSetSquareInstrument(ctx, dragStart, toolPointer, setSquareRotation)
+      if (tool === 'protractor' && dragStart && toolPointer) drawProtractorInstrument(ctx, dragStart, toolPointer, useFixedProtractor ? protractorAngle : null, protractorRotation)
       if (tool === 'compass' && dragStart && preview?.type === 'circle') {
         const pointer = compassPointer ?? { x: dragStart.x + preview.r, y: dragStart.y }
         const currentAngle = Math.atan2(pointer.y - dragStart.y, pointer.x - dragStart.x)
@@ -706,7 +698,7 @@ function App() {
         setMessage(`Erreur d'affichage : ${err?.message ?? String(err)}`)
       }
     }
-  }, [bg, compassPointer, constructionBaseId, dragStart, pdfWords, preview, protractorAngle, pxPerCm, readerBox, selectedId, selectedWordIds, shapes, showGrid, stage, tool, toolPointer, useFixedProtractor, activeProtractor, activeSetSquare, setSquareRotation, protractorRotation])
+  }, [bg, compassPointer, constructionBaseId, dragStart, pdfWords, preview, protractorAngle, pxPerCm, readerBox, selectedId, selectedWordIds, shapes, showGrid, stage, tool, toolPointer, useFixedProtractor, setSquareRotation, protractorRotation])
 
   useEffect(() => {
     redraw()
@@ -878,60 +870,6 @@ function App() {
       setReaderBox({ x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y })
       return
     }
-    if (tool === 'protractor') {
-      // Place or toggle persistent protractor
-      if (!activeProtractor) {
-        setActiveProtractor({ x: pos.x, y: pos.y })
-        setToolPointer(pos)
-        setMessage('Rapporteur placé — déplacez la souris pour orienter, cliquez dessus pour le retirer.')
-      } else {
-        const d = distance(pos.x, pos.y, activeProtractor.x, activeProtractor.y)
-        if (d < 18) {
-          setActiveProtractor(null)
-          setMessage('Rapporteur retiré.')
-        } else {
-          setActiveProtractor({ x: pos.x, y: pos.y })
-          setMessage('Rapporteur déplacé.')
-        }
-        // Double-click to create a permanent angle/traces
-        if ((event as React.PointerEvent).detail === 2) {
-          const measuredAngle = Math.atan2(pos.y - activeProtractor.y, pos.x - activeProtractor.x)
-          const angle = useFixedProtractor ? (-protractorAngle * Math.PI) / 180 : measuredAngle
-          const radius = useFixedProtractor ? 130 : Math.max(70, distance(activeProtractor.x, activeProtractor.y, pos.x, pos.y))
-          const degrees = Math.min(180, Math.round(Math.abs((angle * 180) / Math.PI)))
-          const shape = { id: crypto.randomUUID(), type: 'angle', cx: activeProtractor.x, cy: activeProtractor.y, angle, radius, color, width: strokeWidth, label: `${degrees}°` } as Shape
-          setShapes((items) => [...items, shape])
-          setMessage(`Angle tracé : ${degrees}°`)
-        }
-      }
-      return
-    }
-    if (tool === 'setSquare') {
-      // Place or toggle persistent set square
-      if (!activeSetSquare) {
-        setActiveSetSquare({ x: pos.x, y: pos.y })
-        setToolPointer(pos)
-        setMessage('Équerre placée — déplacez la souris pour orienter, cliquez dessus pour la retirer.')
-      } else {
-        const d = distance(pos.x, pos.y, activeSetSquare.x, activeSetSquare.y)
-        if (d < 18) {
-          setActiveSetSquare(null)
-          setMessage('Équerre retirée.')
-        } else {
-          setActiveSetSquare({ x: pos.x, y: pos.y })
-          setMessage('Équerre déplacée.')
-        }
-        // Double-click to create a permanent triangle/angle trace
-        if ((event as React.PointerEvent).detail === 2) {
-          const w = pos.x - activeSetSquare.x
-          const h = pos.y - activeSetSquare.y
-          const shape = { id: crypto.randomUUID(), type: 'triangle', x: activeSetSquare.x, y: activeSetSquare.y, w, h, color, width: strokeWidth, label: '90°' } as Shape
-          setShapes((items) => [...items, shape])
-          setMessage('Équerre tracée.')
-        }
-      }
-      return
-    }
     if (tool === 'parallel' || tool === 'perpendicular') {
       if (!constructionBaseId) {
         const base = [...shapes]
@@ -1016,22 +954,6 @@ function App() {
     const pos = getPos(event)
     if (tool === 'reader' && readerStart) {
       setReaderBox({ x1: readerStart.x, y1: readerStart.y, x2: pos.x, y2: pos.y })
-      return
-    }
-    if (tool === 'protractor' && activeProtractor) {
-      // Orient persistent protractor with mouse movements
-      setToolPointer(pos)
-      if (!useFixedProtractor) {
-        const deg = Math.min(180, Math.round(Math.abs((Math.atan2(pos.y - activeProtractor.y, pos.x - activeProtractor.x) * 180) / Math.PI)))
-        setProtractorAngle(deg)
-      }
-      return
-    }
-    if (tool === 'setSquare' && activeSetSquare) {
-      // Orient persistent set square with mouse movements
-      setToolPointer(pos)
-      const angle = Math.atan2(pos.y - activeSetSquare.y, pos.x - activeSetSquare.x)
-      setSetSquareRotation(angle)
       return
     }
     if ((tool === 'parallel' || tool === 'perpendicular') && constructionBaseId) {
