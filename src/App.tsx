@@ -988,8 +988,15 @@ function App() {
       return
     }
     setDragStart(pos)
-    const end = tool === 'compass' && useFixedCompass ? { x: pos.x + compassOpeningCm * pxPerCm, y: pos.y } : tool === 'protractor' && useFixedProtractor ? { x: pos.x + Math.cos((-protractorAngle * Math.PI) / 180) * 130, y: pos.y + Math.sin((-protractorAngle * Math.PI) / 180) * 130 } : pos
-    if (tool === 'compass') setCompassPointer(end)
+    let end = pos
+    if (tool === 'compass') {
+      if (useFixedCompass) {
+        end = { x: pos.x + compassOpeningCm * pxPerCm, y: pos.y }
+      }
+      setCompassPointer(end)
+    } else if (tool === 'protractor' && useFixedProtractor) {
+      end = { x: pos.x + Math.cos((-protractorAngle * Math.PI) / 180) * 130, y: pos.y + Math.sin((-protractorAngle * Math.PI) / 180) * 130 }
+    }
     setToolPointer(end)
     const created = makeShape(pos, end)
     setPreview(created)
