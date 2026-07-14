@@ -10,6 +10,7 @@ import {
   CornerDownRight,
   Minus,
   MousePointer2,
+  Pentagon,
   PenLine,
   Printer,
   RotateCcw,
@@ -31,7 +32,7 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
 
-type Tool = 'reader' | 'select' | 'line' | 'segment' | 'midpoint' | 'parallel' | 'perpendicular' | 'ruler' | 'compass' | 'setSquare' | 'protractor' | 'point' | 'text' | 'eraser'
+type Tool = 'reader' | 'select' | 'line' | 'segment' | 'midpoint' | 'parallel' | 'perpendicular' | 'ruler' | 'compass' | 'setSquare' | 'protractor' | 'point' | 'text' | 'eraser' | 'polygon'
 
 type PdfWord = { id: string; text: string; x: number; y: number; w: number; h: number; line: number }
 type ReaderBox = { x1: number; y1: number; x2: number; y2: number }
@@ -42,6 +43,7 @@ type Shape =
   | { id: string; type: 'circle'; cx: number; cy: number; r: number; color: string; width: number; label: string }
   | { id: string; type: 'triangle'; x: number; y: number; w: number; h: number; color: string; width: number; label: string }
   | { id: string; type: 'angle'; cx: number; cy: number; angle: number; radius: number; color: string; width: number; label: string }
+  | { id: string; type: 'polygon'; points: Array<{ x: number; y: number }>; color: string; width: number; label: string }
   | { id: string; type: 'point'; x: number; y: number; color: string; label: string }
   | { id: string; type: 'text'; x: number; y: number; color: string; text: string; size: number }
 
@@ -58,6 +60,7 @@ const tools: Array<{ id: Tool; name: string; hint: string; icon: typeof MousePoi
   { id: 'setSquare', name: 'Équerre', hint: 'Créer angle droit / triangle', icon: TriangleRight },
   { id: 'protractor', name: 'Rapporteur', hint: 'Mesurer et construire un angle', icon: Gauge },
   { id: 'point', name: 'Point', hint: 'Marquer A, B, C...', icon: Sigma },
+  { id: 'polygon', name: 'Polygone', hint: 'Relier des points pour tracer un polygone', icon: Pentagon },
   { id: 'text', name: 'Texte', hint: 'Annoter la figure', icon: Type },
   { id: 'eraser', name: 'Gomme', hint: 'Supprimer un objet', icon: Eraser },
 ]
@@ -517,6 +520,27 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, selected = false
     ctx.fillText(shape.label, shape.cx + 18, shape.cy - 18)
   }
 
+  if (shape.type === 'polygon') {
+    if (shape.points.length < 3) return
+    ctx.lineWidth = shape.width
+    ctx.beginPath()
+    ctx.moveTo(shape.points[0].x, shape.points[0].y)
+    for (let i = 1; i < shape.points.length; i++) {
+      ctx.lineTo(shape.points[i].x, shape.points[i].y)
+    }
+    ctx.closePath()
+    ctx.globalAlpha = 0.14
+    ctx.fill()
+    ctx.globalAlpha = 1
+    ctx.stroke()
+    ctx.beginPath()
+    shape.points.forEach((p) => {
+      ctx.moveTo(p.x + 4, p.y)
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2)
+    })
+    ctx.fill()
+  }
+
   if (shape.type === 'point') {
     ctx.beginPath()
     ctx.arc(shape.x, shape.y, 5, 0, Math.PI * 2)
@@ -544,6 +568,14 @@ function hitTest(shape: Shape, x: number, y: number) {
     return x >= minX - 8 && x <= maxX + 8 && y >= minY - 8 && y <= maxY + 8
   }
   if (shape.type === 'angle') return distance(x, y, shape.cx, shape.cy) < shape.radius + 12 && distance(x, y, shape.cx, shape.cy) > 4
+  if (shape.type === 'polygon') {
+    for (let i = 0; i < shape.points.length; i++) {
+      const p1 = shape.points[i]
+      const p2 = shape.points[(i + 1) % shape.points.length]
+      if (lineDistance(x, y, p1.x, p1.y, p2.x, p2.y) < 12) return true
+    }
+    return false
+  }
   if (shape.type === 'point') return distance(x, y, shape.x, shape.y) < 16
   if (shape.type === 'text') return x >= shape.x && x <= shape.x + shape.text.length * shape.size * 0.65 && y <= shape.y && y >= shape.y - shape.size
   return false
@@ -586,6 +618,7 @@ function App() {
   const [showGrid, setShowGrid] = useState(true)
   const [zoom, setZoom] = useState(0.82)
   const [message, setMessage] = useState('Importez un PDF ou commencez sur une feuille blanche A4.')
+  const [polygonPoints, setPolygonPoints] = useState<Array<{ x: number; y: number }>>([])
 
   const pointLabel = useMemo(() => String.fromCharCode(65 + shapes.filter((s) => s.type === 'point').length), [shapes])
 
@@ -668,6 +701,25 @@ function App() {
         const pencil = { x: dragStart.x + Math.cos(currentAngle) * preview.r, y: dragStart.y + Math.sin(currentAngle) * preview.r }
         drawCompassInstrument(ctx, dragStart, pencil, pxPerCm)
       }
+      if (tool === 'polygon' && polygonPoints.length > 0) {
+        ctx.save()
+        ctx.strokeStyle = color
+        ctx.fillStyle = color
+        ctx.lineWidth = strokeWidth
+        ctx.beginPath()
+        ctx.moveTo(polygonPoints[0].x, polygonPoints[0].y)
+        for (let i = 1; i < polygonPoints.length; i++) {
+          ctx.lineTo(polygonPoints[i].x, polygonPoints[i].y)
+        }
+        ctx.stroke()
+        ctx.beginPath()
+        polygonPoints.forEach((p) => {
+          ctx.moveTo(p.x + 4, p.y)
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2)
+        })
+        ctx.fill()
+        ctx.restore()
+      }
     }
 
     if (bg) {
@@ -698,7 +750,7 @@ function App() {
         setMessage(`Erreur d'affichage : ${err?.message ?? String(err)}`)
       }
     }
-  }, [bg, compassPointer, constructionBaseId, dragStart, pdfWords, preview, protractorAngle, pxPerCm, readerBox, selectedId, selectedWordIds, shapes, showGrid, stage, tool, toolPointer, useFixedProtractor, setSquareRotation, protractorRotation])
+  }, [bg, color, compassPointer, constructionBaseId, dragStart, pdfWords, polygonPoints, preview, protractorAngle, pxPerCm, readerBox, selectedId, selectedWordIds, shapes, showGrid, stage, strokeWidth, tool, toolPointer, useFixedProtractor, setSquareRotation, protractorRotation])
 
   useEffect(() => {
     redraw()
@@ -914,6 +966,24 @@ function App() {
       setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: pos.x, y: pos.y, color, label: pointLabel }])
       return
     }
+    if (tool === 'polygon') {
+      const snapDistance = 18
+      const existingPoint = [...shapes].reverse().find((shape): shape is Extract<Shape, { type: 'point' }> => shape.type === 'point' && distance(pos.x, pos.y, shape.x, shape.y) < snapDistance)
+      const point = existingPoint ? { x: existingPoint.x, y: existingPoint.y } : { x: pos.x, y: pos.y }
+      if (polygonPoints.length >= 3) {
+        const first = polygonPoints[0]
+        if (distance(point.x, point.y, first.x, first.y) < snapDistance) {
+          const shape = { id: crypto.randomUUID(), type: 'polygon', points: polygonPoints, color, width: strokeWidth, label: '' } as Shape
+          setShapes((items) => [...items, shape])
+          setPolygonPoints([])
+          setMessage('Polygone tracé.')
+          return
+        }
+      }
+      setPolygonPoints((points) => [...points, point])
+      setMessage(`Point ${polygonPoints.length + 1} ajouté. Cliquez sur le premier point pour fermer le polygone.`)
+      return
+    }
     if (tool === 'text') {
       const text = window.prompt('Texte à placer sur le PDF :', 'Donnée / construction')
       if (text) setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'text', x: pos.x, y: pos.y, color, text, size: 24 }])
@@ -973,6 +1043,7 @@ function App() {
           if (shape.type === 'circle') return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
           if (shape.type === 'triangle') return { ...shape, x: shape.x + dx, y: shape.y + dy }
           if (shape.type === 'angle') return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
+          if (shape.type === 'polygon') return { ...shape, points: shape.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
           if (shape.type === 'point') return { ...shape, x: shape.x + dx, y: shape.y + dy }
           if (shape.type === 'text') return { ...shape, x: shape.x + dx, y: shape.y + dy }
           return shape
@@ -1180,6 +1251,7 @@ function App() {
               {tool === 'ruler' && <p className="mt-1 text-sm font-semibold text-amber-200">Latte graduée : glissez pour aligner la règle et tracer un segment mesuré.</p>}
               {tool === 'setSquare' && <p className="mt-1 text-sm font-semibold text-sky-200">Équerre : glissez pour poser le triangle transparent. Utilisez ←/→ ou Q/E pour tourner (Shift pour rotation rapide).</p>}
               {tool === 'protractor' && <p className="mt-1 text-sm font-semibold text-purple-200">Rapporteur : centre au premier clic, glissez pour mesurer/construire l'angle. Utilisez ←/→ ou Q/E pour tourner (Shift pour rotation rapide). Angle actuel : {protractorAngle}°.</p>}
+              {tool === 'polygon' && <p className="mt-1 text-sm font-semibold text-indigo-200">Polygone : cliquez pour ajouter des points. Cliquez sur le premier point (ou un point existant) pour fermer le polygone.</p>}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={() => speak()} className="rounded-xl bg-yellow-500 px-3 py-2 font-bold text-slate-950 hover:bg-yellow-400"><Volume2 className="inline h-5 w-5" /> Lire</button>
