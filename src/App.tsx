@@ -584,6 +584,7 @@ function hitTest(shape: Shape, x: number, y: number) {
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const textInputRef = useRef<HTMLInputElement>(null)
   const [tool, setTool] = useState<Tool>('ruler')
   const [shapes, setShapes] = useState<Shape[]>([])
   const [preview, setPreview] = useState<Shape | null>(null)
@@ -619,6 +620,8 @@ function App() {
   const [zoom, setZoom] = useState(0.82)
   const [message, setMessage] = useState('Importez un PDF ou commencez sur une feuille blanche A4.')
   const [polygonPoints, setPolygonPoints] = useState<Array<{ x: number; y: number }>>([])
+  const [pendingTextPos, setPendingTextPos] = useState<{ x: number; y: number } | null>(null)
+  const [textDraft, setTextDraft] = useState('')
 
   const pointLabel = useMemo(() => String.fromCharCode(65 + shapes.filter((s) => s.type === 'point').length), [shapes])
 
@@ -755,6 +758,10 @@ function App() {
   useEffect(() => {
     redraw()
   }, [redraw])
+
+  useEffect(() => {
+    if (pendingTextPos) textInputRef.current?.focus()
+  }, [pendingTextPos])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -985,8 +992,9 @@ function App() {
       return
     }
     if (tool === 'text') {
-      const text = window.prompt('Texte à placer sur le PDF :', 'Donnée / construction')
-      if (text) setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'text', x: pos.x, y: pos.y, color, text, size: 24 }])
+      setPendingTextPos(pos)
+      setTextDraft('')
+      setMessage('Position choisie — tapez le texte dans la fenêtre puis validez (Entrée).')
       return
     }
     if (tool === 'eraser') {
@@ -1090,6 +1098,21 @@ function App() {
     setDragStart(null)
     setCompassPointer(null)
     setToolPointer(null)
+  }
+
+  const confirmText = () => {
+    const text = textDraft.trim()
+    if (pendingTextPos && text) {
+      setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'text', x: pendingTextPos.x, y: pendingTextPos.y, color, text, size: 24 }])
+      setMessage(`Texte « ${text} » placé.`)
+    }
+    setPendingTextPos(null)
+    setTextDraft('')
+  }
+
+  const cancelText = () => {
+    setPendingTextPos(null)
+    setTextDraft('')
   }
 
   const exportImage = () => {
@@ -1252,6 +1275,7 @@ function App() {
               {tool === 'setSquare' && <p className="mt-1 text-sm font-semibold text-sky-200">Équerre : glissez pour poser le triangle transparent. Utilisez ←/→ ou Q/E pour tourner (Shift pour rotation rapide).</p>}
               {tool === 'protractor' && <p className="mt-1 text-sm font-semibold text-purple-200">Rapporteur : centre au premier clic, glissez pour mesurer/construire l'angle. Utilisez ←/→ ou Q/E pour tourner (Shift pour rotation rapide). Angle actuel : {protractorAngle}°.</p>}
               {tool === 'polygon' && <p className="mt-1 text-sm font-semibold text-indigo-200">Polygone : cliquez pour ajouter des points. Cliquez sur le premier point (ou un point existant) pour fermer le polygone.</p>}
+              {tool === 'text' && <p className="mt-1 text-sm font-semibold text-blue-200">Texte : cliquez sur la page pour choisir la position, tapez le texte dans la fenêtre qui s'ouvre, puis validez.</p>}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={() => speak()} className="rounded-xl bg-yellow-500 px-3 py-2 font-bold text-slate-950 hover:bg-yellow-400"><Volume2 className="inline h-5 w-5" /> Lire</button>
@@ -1279,6 +1303,29 @@ function App() {
           </div>
         </div>
       </section>
+
+      {pendingTextPos && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/70 p-4 backdrop-blur-sm">
+          <form
+            onSubmit={(e) => { e.preventDefault(); confirmText() }}
+            className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900 p-5 shadow-2xl"
+          >
+            <h3 className="mb-3 text-lg font-black text-white">Texte à placer</h3>
+            <input
+              ref={textInputRef}
+              value={textDraft}
+              onChange={(e) => setTextDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') cancelText() }}
+              placeholder="Donnée / construction"
+              className="mb-4 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-white placeholder:text-slate-500 focus:border-blue-300 focus:outline-none"
+            />
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={cancelText} className="rounded-2xl bg-slate-800 px-4 py-2 font-bold hover:bg-slate-700">Annuler</button>
+              <button type="submit" className="rounded-2xl bg-blue-500 px-4 py-2 font-bold text-white hover:bg-blue-400">Placer le texte</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <footer className="mx-auto max-w-7xl px-4 pb-6 text-center text-sm text-slate-500">
         Astuce : choisissez “PDF” puis “Enregistrer au format PDF” dans la fenêtre d'impression pour récupérer votre feuille construite.
