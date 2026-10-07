@@ -1,6 +1,12 @@
-# Cloudflare Pages configuration
-name = "geomaitre-pdf-atelier"
-compatibility_date = "2024-01-01"
+# Worker du site ateliergeomaitrepdf.org (build Vite -> dist/)
+# main = garde d'accès (URL signée classesnumeriques.app)
+# run_worker_first : toutes les requêtes passent par le worker avant les assets
+name = "atelier-pdf-geomaitre"
+compatibility_date = "2025-10-01"
+main = "site-worker.js"
 
 [assets]
 directory = "./dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "single-page-application"
