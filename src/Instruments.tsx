@@ -136,6 +136,8 @@ function protractor(cm: number): { body: ReactNode; handles: Handles } {
 
 const builders = { ruler, setSquare, protractor }
 
+type DragMode = 'move' | 'rotate' | 'ray'
+
 type Props = {
   instruments: InstrumentsState
   stage: { width: number; height: number }
@@ -144,11 +146,13 @@ type Props = {
   bodyDraggable: boolean // faux quand un outil de tracé est choisi : on dessine à travers l'instrument
   onChange: (kind: InstrumentKind, state: InstrumentState) => void
   onClose: (kind: InstrumentKind) => void
+  rayDeg: number // rayon du rapporteur, en degrés depuis la droite (sens antihoraire)
+  onRay: (deg: number) => void
 }
 
-export default function Instruments({ instruments, stage, pxPerCm, zoom, bodyDraggable, onChange, onClose }: Props) {
+export default function Instruments({ instruments, stage, pxPerCm, zoom, bodyDraggable, onChange, onClose, rayDeg, onRay }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
-  const drag = useRef<{ kind: InstrumentKind; mode: 'move' | 'rotate'; pointerId: number; dx: number; dy: number; offset: number } | null>(null)
+  const drag = useRef<{ kind: InstrumentKind; mode: DragMode; pointerId: number; dx: number; dy: number; offset: number; x0: number; y0: number; tap: boolean } | null>(null)
   const k = 1 / zoom // boutons de taille constante à l'écran
 
   const pos = (e: React.PointerEvent) => {
@@ -157,13 +161,19 @@ export default function Instruments({ instruments, stage, pxPerCm, zoom, bodyDra
   }
   const angleTo = (s: InstrumentState, p: { x: number; y: number }) => (Math.atan2(p.y - s.y, p.x - s.x) * 180) / Math.PI
 
-  const start = (kind: InstrumentKind, s: InstrumentState, mode: 'move' | 'rotate') => (e: React.PointerEvent) => {
+  // Direction du pointeur vue depuis le centre du rapporteur, ramenée entre 0° et 180°
+  const rayAt = (s: InstrumentState, p: { x: number; y: number }) => {
+    const t = (((s.rot - angleTo(s, p)) % 360) + 360) % 360
+    return t <= 180 ? Math.round(t) : t < 270 ? 180 : 0
+  }
+
+  const start = (kind: InstrumentKind, s: InstrumentState, mode: DragMode, tap = false) => (e: React.PointerEvent) => {
     if (e.button > 0 || drag.current) return
     e.preventDefault()
     e.stopPropagation()
     e.currentTarget.setPointerCapture(e.pointerId)
     const p = pos(e)
-    drag.current = { kind, mode, pointerId: e.pointerId, dx: s.x - p.x, dy: s.y - p.y, offset: s.rot - angleTo(s, p) }
+    drag.current = { kind, mode, pointerId: e.pointerId, dx: s.x - p.x, dy: s.y - p.y, offset: s.rot - angleTo(s, p), x0: e.clientX, y0: e.clientY, tap }
   }
   const move = (e: React.PointerEvent) => {
     const d = drag.current
@@ -171,7 +181,11 @@ export default function Instruments({ instruments, stage, pxPerCm, zoom, bodyDra
     const s = instruments[d.kind]
     if (!s) return
     const p = pos(e)
-    if (d.mode === 'move') {
+    if (d.tap && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 5) d.tap = false
+    if (d.tap) return
+    if (d.mode === 'ray') {
+      onRay(rayAt(s, p))
+    } else if (d.mode === 'move') {
       onChange(d.kind, {
         ...s,
         x: Math.min(stage.width, Math.max(0, p.x + d.dx)),
@@ -182,7 +196,12 @@ export default function Instruments({ instruments, stage, pxPerCm, zoom, bodyDra
     }
   }
   const end = (e: React.PointerEvent) => {
-    if (drag.current?.pointerId === e.pointerId) drag.current = null
+    const d = drag.current
+    if (d?.pointerId !== e.pointerId) return
+    drag.current = null
+    const s = instruments[d.kind]
+    // Simple appui sur le rapporteur : le rayon se place à cet endroit
+    if (d.tap && d.kind === 'protractor' && s && e.type === 'pointerup') onRay(rayAt(s, pos(e)))
   }
   const dragProps = { onPointerMove: move, onPointerUp: end, onPointerCancel: end, onLostPointerCapture: end }
 
@@ -209,11 +228,25 @@ export default function Instruments({ instruments, stage, pxPerCm, zoom, bodyDra
           <g key={kind} data-instrument={kind} transform={`translate(${s.x} ${s.y}) rotate(${s.rot})`}>
             <g
               style={{ filter: 'drop-shadow(0 6px 10px rgba(15,23,42,.28))', cursor: 'move', touchAction: 'none', pointerEvents: bodyDraggable ? 'auto' : 'none' }}
-              onPointerDown={start(kind, s, 'move')}
+              onPointerDown={start(kind, s, 'move', true)}
               {...dragProps}
             >
               {body}
             </g>
+            {kind === 'protractor' && (() => {
+              const t = (rayDeg * Math.PI) / 180
+              const len = PROTRACTOR_CM * pxPerCm + 45 * k
+              const at: [number, number] = [Math.cos(t) * len, -Math.sin(t) * len]
+              return (
+                <>
+                  <line x1={0} y1={0} x2={at[0]} y2={at[1]} stroke="#dc2626" strokeWidth={2} strokeDasharray="7 5" />
+                  <g data-handle="ray" style={{ ...active, cursor: 'grab' }} onPointerDown={start(kind, s, 'ray')} {...dragProps}>
+                    <title>Régler l'angle</title>
+                    {button(at, '#f59e0b', <path d="M-6 6H7M-6 6L4-7M1 6A7 7 0 0 0-2 1" />)}
+                  </g>
+                </>
+              )
+            })()}
             <g data-handle="move" style={{ ...active, cursor: 'move' }} onPointerDown={start(kind, s, 'move')} {...dragProps}>
               <title>{`Déplacer : ${name}`}</title>
               {button(handles.move, '#475569', <path d="M-8 0H8M0-8V8M-5-3L-8 0L-5 3M5-3L8 0L5 3M-3-5L0-8L3-5M-3 5L0 8L3 5" strokeWidth={1.8} />)}

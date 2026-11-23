@@ -29,6 +29,8 @@ import {
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import Instruments from './Instruments'
+import Compass from './Compass'
+import type { CompassState } from './Compass'
 import type { InstrumentKind, InstrumentsState } from './Instruments'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
@@ -41,10 +43,10 @@ type ReaderBox = { x1: number; y1: number; x2: number; y2: number }
 
 type Shape =
   | { id: string; type: 'line'; x1: number; y1: number; x2: number; y2: number; color: string; width: number; label: string }
-  | { id: string; type: 'segment'; x1: number; y1: number; x2: number; y2: number; color: string; width: number; label: string }
+  | { id: string; type: 'segment'; x1: number; y1: number; x2: number; y2: number; color: string; width: number; label: string; ray?: boolean }
   | { id: string; type: 'circle'; cx: number; cy: number; r: number; color: string; width: number; label: string }
   | { id: string; type: 'triangle'; x: number; y: number; w: number; h: number; color: string; width: number; label: string }
-  | { id: string; type: 'angle'; cx: number; cy: number; angle: number; radius: number; color: string; width: number; label: string }
+  | { id: string; type: 'arc'; cx: number; cy: number; r: number; start: number; sweep: number; color: string; width: number; label: string }
   | { id: string; type: 'polygon'; points: Array<{ x: number; y: number }>; color: string; width: number; label: string }
   | { id: string; type: 'point'; x: number; y: number; color: string; label: string }
   | { id: string; type: 'text'; x: number; y: number; color: string; text: string; size: number }
@@ -58,7 +60,7 @@ const tools: Array<{ id: Tool; name: string; hint: string; icon: typeof MousePoi
   { id: 'parallel', name: 'Parallèle', hint: 'Droite parallèle à une droite passant par un point', icon: Rows3 },
   { id: 'perpendicular', name: 'Perpendiculaire', hint: 'Droite perpendiculaire à une droite passant par un point', icon: CornerDownRight },
   { id: 'ruler', name: 'Latte', hint: 'Tracer une droite mesurée', icon: Ruler },
-  { id: 'compass', name: 'Vrai compas', hint: 'Pointe sèche + mine pour tracer un cercle', icon: PenLine },
+  { id: 'compass', name: 'Vrai compas', hint: 'Tracer un arc de cercle ou un cercle', icon: PenLine },
   { id: 'setSquare', name: 'Équerre', hint: 'Créer angle droit / triangle', icon: TriangleRight },
   { id: 'protractor', name: 'Rapporteur', hint: 'Mesurer et construire un angle', icon: Gauge },
   { id: 'point', name: 'Point', hint: 'Marquer un point', icon: Sigma },
@@ -68,6 +70,7 @@ const tools: Array<{ id: Tool; name: string; hint: string; icon: typeof MousePoi
 ]
 
 const colors = ['#0f172a', '#2563eb', '#dc2626', '#16a34a', '#9333ea', '#ea580c']
+const PROTRACTOR_CM = 6 // rayon du rapporteur (voir Instruments.tsx)
 const A4 = { width: 840, height: 1188 }
 
 function distance(x1: number, y1: number, x2: number, y2: number) {
@@ -342,7 +345,7 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, selected = false
     // Draw endpoints
     ctx.beginPath()
     ctx.arc(shape.x1, shape.y1, 4, 0, Math.PI * 2)
-    ctx.arc(shape.x2, shape.y2, 4, 0, Math.PI * 2)
+    if (!shape.ray) ctx.arc(shape.x2, shape.y2, 4, 0, Math.PI * 2)
     ctx.fill()
   }
 
@@ -385,22 +388,18 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, selected = false
     ctx.fillText(shape.label, shape.x + 12, shape.y + Math.sign(shape.h) * 38)
   }
 
-  if (shape.type === 'angle') {
+  if (shape.type === 'arc') {
     ctx.lineWidth = shape.width
     ctx.beginPath()
-    ctx.moveTo(shape.cx, shape.cy)
-    ctx.lineTo(shape.cx + shape.radius, shape.cy)
-    ctx.moveTo(shape.cx, shape.cy)
-    ctx.lineTo(shape.cx + Math.cos(shape.angle) * shape.radius, shape.cy + Math.sin(shape.angle) * shape.radius)
+    ctx.arc(shape.cx, shape.cy, shape.r, shape.start, shape.start + shape.sweep, shape.sweep < 0)
     ctx.stroke()
-    ctx.beginPath()
-    ctx.arc(shape.cx, shape.cy, Math.min(58, shape.radius * 0.42), Math.min(0, shape.angle), Math.max(0, shape.angle))
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.arc(shape.cx, shape.cy, 4, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.font = '700 18px Inter, system-ui'
-    ctx.fillText(shape.label, shape.cx + 18, shape.cy - 18)
+    if (shape.label) {
+      const mid = shape.start + shape.sweep / 2
+      ctx.font = '700 18px Inter, system-ui'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(shape.label, shape.cx + Math.cos(mid) * (shape.r + 24), shape.cy + Math.sin(mid) * (shape.r + 24))
+    }
   }
 
   if (shape.type === 'polygon') {
@@ -450,7 +449,12 @@ function hitTest(shape: Shape, x: number, y: number) {
     const maxY = Math.max(shape.y, shape.y + shape.h)
     return x >= minX - 8 && x <= maxX + 8 && y >= minY - 8 && y <= maxY + 8
   }
-  if (shape.type === 'angle') return distance(x, y, shape.cx, shape.cy) < shape.radius + 12 && distance(x, y, shape.cx, shape.cy) > 4
+  if (shape.type === 'arc') {
+    const full = Math.PI * 2
+    const from = shape.sweep < 0 ? shape.start + shape.sweep : shape.start
+    const d = (((Math.atan2(y - shape.cy, x - shape.cx) - from) % full) + full) % full
+    return Math.abs(distance(x, y, shape.cx, shape.cy) - shape.r) < 12 && d <= Math.abs(shape.sweep)
+  }
   if (shape.type === 'polygon') {
     for (let i = 0; i < shape.points.length; i++) {
       const p1 = shape.points[i]
@@ -496,7 +500,9 @@ function App() {
   const [compassOpeningCm, setCompassOpeningCm] = useState(3)
   const [useFixedCompass, setUseFixedCompass] = useState(false)
   const [protractorAngle, setProtractorAngle] = useState(60)
-  const [useFixedProtractor, setUseFixedProtractor] = useState(false)
+  const [zeroSide, setZeroSide] = useState<'right' | 'left'>('right')
+  const [compassMode, setCompassMode] = useState<'arc' | 'circle'>('arc')
+  const [compass, setCompass] = useState<CompassState | null>(null)
   const [instruments, setInstruments] = useState<InstrumentsState>({})
   const scrollRef = useRef<HTMLDivElement>(null)
   const [namePoints, setNamePoints] = useState(false)
@@ -516,6 +522,54 @@ function App() {
       x: ((event.clientX - rect.left) / rect.width) * stage.width,
       y: ((event.clientY - rect.top) / rect.height) * stage.height,
     }
+  }
+
+  // Accroche aux points et aux extrémités de segments proches
+  const snap = (p: { x: number; y: number }) => {
+    let best = { x: p.x, y: p.y }
+    let min = 12 / zoom
+    const test = (x: number, y: number) => {
+      const d = distance(p.x, p.y, x, y)
+      if (d < min) { min = d; best = { x, y } }
+    }
+    shapes.forEach((shape) => {
+      if (shape.type === 'point') test(shape.x, shape.y)
+      if (shape.type === 'segment') {
+        test(shape.x1, shape.y1)
+        if (!shape.ray) test(shape.x2, shape.y2)
+      }
+      if (shape.type === 'polygon') shape.points.forEach((q) => test(q.x, q.y))
+    })
+    return best
+  }
+
+  // Rayon du rapporteur : degrés depuis la droite, quel que soit le côté du 0°
+  const rayDeg = zeroSide === 'right' ? protractorAngle : 180 - protractorAngle
+
+  const traceAngle = (what: 'ray' | 'mark' | 'text' | 'all') => {
+    const p = instruments.protractor
+    if (!p) return
+    const rad = Math.PI / 180
+    const base = (p.rot - (zeroSide === 'right' ? 0 : 180)) * rad
+    const ray = (p.rot - rayDeg) * rad
+    const len = (PROTRACTOR_CM + 1) * pxPerCm
+    const side = (a: number): Shape => ({ id: crypto.randomUUID(), type: 'segment', x1: p.x, y1: p.y, x2: p.x + Math.cos(a) * len, y2: p.y + Math.sin(a) * len, color, width: strokeWidth, label: '', ray: true })
+    const added: Shape[] = []
+    if (what === 'all') added.push(side(base))
+    if (what === 'all' || what === 'ray') added.push(side(ray))
+    if (what !== 'ray' && protractorAngle > 0) {
+      added.push({ id: crypto.randomUUID(), type: 'arc', cx: p.x, cy: p.y, r: pxPerCm * 1.3, start: base, sweep: protractorAngle * rad * (zeroSide === 'right' ? -1 : 1), color, width: strokeWidth, label: what === 'mark' ? '' : `${protractorAngle}°` })
+    }
+    setShapes((items) => [...items, ...added])
+    setMessage(`Angle de ${protractorAngle}° : tracé ajouté.`)
+  }
+
+  const traceArc = (start: number, sweep: number, done: boolean) => {
+    if (!compass) return
+    const r = compassOpeningCm * pxPerCm
+    const arc: Shape = { id: crypto.randomUUID(), type: 'arc', cx: compass.x, cy: compass.y, r, start, sweep, color, width: strokeWidth, label: '' }
+    setPreview(done ? null : arc)
+    if (done && Math.abs(sweep) * r > 3) setShapes((items) => [...items, arc])
   }
 
   const makeShape = useCallback(
@@ -546,18 +600,11 @@ function App() {
         case 'setSquare': {
           return { id, type: 'triangle', x: start.x, y: start.y, w: end.x - start.x, h: end.y - start.y, color, width: strokeWidth, label: '90°' }
         }
-        case 'protractor': {
-          const measuredAngle = Math.atan2(end.y - start.y, end.x - start.x)
-          const angle = useFixedProtractor ? (-protractorAngle * Math.PI) / 180 : measuredAngle
-          const radius = useFixedProtractor ? 130 : Math.max(70, distance(start.x, start.y, end.x, end.y))
-          const degrees = Math.min(180, Math.round(Math.abs((angle * 180) / Math.PI)))
-          return { id, type: 'angle', cx: start.x, cy: start.y, angle, radius, color, width: strokeWidth, label: `${degrees}°` }
-        }
         default:
           return null
       }
     },
-    [color, compassOpeningCm, protractorAngle, pxPerCm, stage, strokeWidth, tool, useFixedCompass, useFixedProtractor],
+    [color, compassOpeningCm, pxPerCm, stage, strokeWidth, tool, useFixedCompass],
   )
 
   const redraw = useCallback(() => {
@@ -918,6 +965,18 @@ function App() {
       if (found) setMoving({ id: found.id, x: pos.x, y: pos.y })
       return
     }
+    if (tool === 'protractor') {
+      // Appui sur la page : le centre du rapporteur vient se poser là
+      const c = snap(pos)
+      setInstruments((items) => ({ ...items, protractor: { x: c.x, y: c.y, rot: items.protractor?.rot ?? 0 } }))
+      return
+    }
+    if (tool === 'compass' && compassMode === 'arc') {
+      const c = snap(pos)
+      setDragStart(c)
+      setCompass({ x: c.x, y: c.y, rot: compass?.rot ?? 0 })
+      return
+    }
     setDragStart(pos)
     let end = pos
     // Handle compass-specific logic
@@ -926,12 +985,6 @@ function App() {
         end = { x: pos.x + compassOpeningCm * pxPerCm, y: pos.y }
       }
       setCompassPointer(end)
-    }
-    // Handle protractor-specific logic  
-    if ((tool as Tool) === 'protractor') {
-      if (useFixedProtractor) {
-        end = { x: pos.x + Math.cos((-protractorAngle * Math.PI) / 180) * 130, y: pos.y + Math.sin((-protractorAngle * Math.PI) / 180) * 130 }
-      }
     }
     setToolPointer(end)
     const created = makeShape(pos, end)
@@ -960,7 +1013,7 @@ function App() {
           if (shape.type === 'segment') return { ...shape, x1: shape.x1 + dx, y1: shape.y1 + dy, x2: shape.x2 + dx, y2: shape.y2 + dy }
           if (shape.type === 'circle') return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
           if (shape.type === 'triangle') return { ...shape, x: shape.x + dx, y: shape.y + dy }
-          if (shape.type === 'angle') return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
+          if (shape.type === 'arc') return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
           if (shape.type === 'polygon') return { ...shape, points: shape.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) }
           if (shape.type === 'point') return { ...shape, x: shape.x + dx, y: shape.y + dy }
           if (shape.type === 'text') return { ...shape, x: shape.x + dx, y: shape.y + dy }
@@ -970,14 +1023,19 @@ function App() {
       return
     }
     if (!dragStart) return
+    if (tool === 'compass' && compassMode === 'arc') {
+      const p = snap(pos)
+      const r = distance(dragStart.x, dragStart.y, p.x, p.y)
+      if (r < 12) return
+      setCompass({ ...dragStart, rot: Math.atan2(p.y - dragStart.y, p.x - dragStart.x) })
+      if (!useFixedCompass) setCompassOpeningCm(r / pxPerCm)
+      return
+    }
     if (tool === 'compass') setCompassPointer(pos)
     setToolPointer(pos)
     setPreview(makeShape(dragStart, pos))
     if (tool === 'compass' && !useFixedCompass) {
       setCompassOpeningCm(Math.max(0.2, distance(dragStart.x, dragStart.y, pos.x, pos.y) / pxPerCm))
-    }
-    if (tool === 'protractor' && !useFixedProtractor) {
-      setProtractorAngle(Math.min(180, Math.round(Math.abs((Math.atan2(pos.y - dragStart.y, pos.x - dragStart.x) * 180) / Math.PI))))
     }
   }
 
@@ -1096,6 +1154,13 @@ function App() {
                 Nommer les points (A, B, C…)
               </label>
             )}
+            {tool === 'compass' && (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {([['arc', 'Arc de cercle'], ['circle', 'Cercle complet']] as const).map(([mode, name]) => (
+                  <button key={mode} aria-pressed={compassMode === mode} onClick={() => setCompassMode(mode)} className={`rounded-xl px-2 py-2 text-sm font-bold ${compassMode === mode ? 'bg-blue-500 text-white' : 'bg-slate-900 text-slate-300 hover:bg-slate-800'}`}>{name}</button>
+                ))}
+              </div>
+            )}
             <p className="mb-2 mt-4 text-sm font-semibold text-slate-300">Afficher sur la page</p>
             <div className="grid grid-cols-3 gap-2">
               {([['ruler', Ruler], ['setSquare', TriangleRight], ['protractor', Gauge]] as const).map(([kind, Icon]) => (
@@ -1131,18 +1196,15 @@ function App() {
                 {useFixedCompass ? 'Ouverture verrouillée' : 'Ouverture libre au glisser'}
               </button>
               <p className="mt-2 text-xs leading-relaxed text-slate-300">
-                Mode compas : posez la pointe sèche au centre, ouvrez les branches vers la mine, puis relâchez pour tracer le cercle.
+                Mode compas : posez la pointe sèche au centre, ouvrez les branches vers la mine, puis relâchez. En mode Arc, glissez ensuite le crayon bleu pour tracer.
               </p>
             </div>
             <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/10 p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
-                <label className="text-sm font-bold text-amber-100">Latte, équerre, rapporteur</label>
+                <label className="text-sm font-bold text-amber-100">Angle du rapporteur</label>
                 <span className="rounded-full bg-slate-950 px-2 py-1 text-xs font-black text-amber-200">{protractorAngle}°</span>
               </div>
               <input type="range" min="0" max="180" step="1" value={protractorAngle} onChange={(e) => setProtractorAngle(Number(e.target.value))} className="w-full accent-amber-400" />
-              <button onClick={() => setUseFixedProtractor((v) => !v)} className={`mt-3 w-full rounded-xl px-3 py-2 text-sm font-black transition ${useFixedProtractor ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 text-slate-300 hover:bg-slate-800'}`}>
-                {useFixedProtractor ? 'Angle verrouillé' : 'Angle libre au glisser'}
-              </button>
               <p className="mt-2 text-xs leading-relaxed text-slate-300">
                 Les instruments affichés sur la page se déplacent en les glissant, se tournent avec le rond bleu et se ferment avec la croix rouge. Ils ne sont pas imprimés.
               </p>
@@ -1199,10 +1261,10 @@ function App() {
               {tool === 'midpoint' && <p className="mt-1 text-sm font-semibold text-slate-200">Milieu : cliquez sur un segment existant pour marquer automatiquement son milieu.</p>}
               {tool === 'parallel' && <p className="mt-1 text-sm font-semibold text-emerald-200">Parallèle : 1) cliquez une droite de base, 2) cliquez le point par lequel la parallèle doit passer.</p>}
               {tool === 'perpendicular' && <p className="mt-1 text-sm font-semibold text-red-200">Perpendiculaire : 1) cliquez une droite de base, 2) cliquez le point par lequel la perpendiculaire doit passer.</p>}
-              {tool === 'compass' && <p className="mt-1 text-sm font-semibold text-blue-200">Pointe sèche = premier clic. Mine = déplacement. Ouverture actuelle : {compassOpeningCm.toFixed(1)} cm.</p>}
+              {tool === 'compass' && <p className="mt-1 text-sm font-semibold text-blue-200">Pointe sèche = premier clic. Mine = déplacement. Ouverture actuelle : {compassOpeningCm.toFixed(1)} cm.{compassMode === 'arc' && ' Ensuite, glissez le crayon bleu pour tracer un arc ; le rond vert tourne sans tracer.'}</p>}
               {tool === 'ruler' && <p className="mt-1 text-sm font-semibold text-amber-200">Latte : glissez la latte pour la déplacer, ou glissez sur la page pour tracer un segment mesuré. Pour tracer le long de la latte, choisissez Segment ou Droite.</p>}
               {tool === 'setSquare' && <p className="mt-1 text-sm font-semibold text-sky-200">Équerre : glissez-la pour la déplacer, rond bleu (ou ←/→) pour la tourner, croix rouge pour la fermer. Pour tracer le long de l'équerre, choisissez Segment ou Droite. Glisser sur la page construit un triangle rectangle.</p>}
-              {tool === 'protractor' && <p className="mt-1 text-sm font-semibold text-purple-200">Rapporteur : glissez-le pour le déplacer, rond bleu (ou ←/→) pour le tourner, croix rouge pour le fermer. Glisser sur la page construit un angle. Angle actuel : {protractorAngle}°.</p>}
+              {tool === 'protractor' && <p className="mt-1 text-sm font-semibold text-purple-200">Rapporteur : glissez-le pour le déplacer, rond bleu (ou ←/→) pour le tourner, croix rouge pour le fermer. Cliquez sur la page pour poser le centre sur le sommet, puis réglez l'angle avec le rond orange.</p>}
               {tool === 'polygon' && <p className="mt-1 text-sm font-semibold text-indigo-200">Polygone : cliquez pour ajouter des points. Cliquez sur le premier point (ou un point existant) pour fermer le polygone.</p>}
               {tool === 'text' && <p className="mt-1 text-sm font-semibold text-blue-200">Texte : cliquez sur la page pour choisir la position, tapez le texte dans la fenêtre qui s'ouvre, puis validez.</p>}
             </div>
@@ -1217,6 +1279,18 @@ function App() {
             </div>
           </div>
 
+          {instruments.protractor && (
+            <div className="sticky top-0 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-2xl bg-slate-100 p-2 text-sm font-bold text-slate-800 shadow-lg" data-bar="angle">
+              <label className="flex items-center gap-1 text-amber-800">
+                Angle :
+                <input type="number" min={0} max={180} value={protractorAngle} onChange={(e) => setProtractorAngle(Math.max(0, Math.min(180, Math.round(Number(e.target.value)) || 0)))} className="w-16 rounded-lg border border-slate-400 bg-white px-2 py-1" />°
+              </label>
+              <button onClick={() => { setZeroSide(zeroSide === 'right' ? 'left' : 'right'); setProtractorAngle(180 - protractorAngle) }} className="rounded-lg border border-slate-400 bg-white px-3 py-1.5 hover:bg-slate-200">{zeroSide === 'right' ? '0° à droite (rouge)' : '0° à gauche (noir)'}</button>
+              {([['all', "Tracer l'angle"], ['ray', 'Tracer ce rayon'], ['mark', "Marquer l'angle"], ['text', 'Angle + texte']] as const).map(([what, name]) => (
+                <button key={what} onClick={() => traceAngle(what)} className={`rounded-lg border px-3 py-1.5 ${what === 'all' ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-500' : 'border-slate-400 bg-white hover:bg-slate-200'}`}>{name}</button>
+              ))}
+            </div>
+          )}
           <div ref={scrollRef} className="max-h-[78vh] overflow-auto rounded-2xl bg-slate-800 p-4">
             <div className="relative mx-auto origin-top rounded bg-white shadow-2xl" style={{ width: stage.width * zoom, height: stage.height * zoom }}>
               <canvas
@@ -1235,9 +1309,29 @@ function App() {
                 pxPerCm={pxPerCm}
                 zoom={zoom}
                 bodyDraggable={tool === 'select' || tool === 'ruler' || tool === 'setSquare' || tool === 'protractor'}
-                onChange={(kind, state) => setInstruments((items) => (items[kind] ? { ...items, [kind]: state } : items))}
+                onChange={(kind, state) => setInstruments((items) => {
+                  const old = items[kind]
+                  if (!old) return items
+                  const moved = old.x !== state.x || old.y !== state.y
+                  return { ...items, [kind]: kind === 'protractor' && moved ? { ...state, ...snap(state) } : state }
+                })}
                 onClose={hideInstrument}
+                rayDeg={rayDeg}
+                onRay={(deg) => setProtractorAngle(zeroSide === 'right' ? deg : 180 - deg)}
               />
+              {tool === 'compass' && compassMode === 'arc' && compass && (
+                <Compass
+                  compass={compass}
+                  r={compassOpeningCm * pxPerCm}
+                  stage={stage}
+                  zoom={zoom}
+                  color={color}
+                  onMove={(p) => { const c = snap({ x: Math.min(stage.width, Math.max(0, p.x)), y: Math.min(stage.height, Math.max(0, p.y)) }); setCompass({ ...compass, x: c.x, y: c.y }) }}
+                  onTurn={(rot) => setCompass((c) => c && { ...c, rot })}
+                  onTrace={traceArc}
+                  onClose={() => setCompass(null)}
+                />
+              )}
             </div>
           </div>
         </div>
