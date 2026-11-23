@@ -61,7 +61,7 @@ const tools: Array<{ id: Tool; name: string; hint: string; icon: typeof MousePoi
   { id: 'compass', name: 'Vrai compas', hint: 'Pointe sèche + mine pour tracer un cercle', icon: PenLine },
   { id: 'setSquare', name: 'Équerre', hint: 'Créer angle droit / triangle', icon: TriangleRight },
   { id: 'protractor', name: 'Rapporteur', hint: 'Mesurer et construire un angle', icon: Gauge },
-  { id: 'point', name: 'Point', hint: 'Marquer A, B, C...', icon: Sigma },
+  { id: 'point', name: 'Point', hint: 'Marquer un point', icon: Sigma },
   { id: 'polygon', name: 'Polygone', hint: 'Relier des points pour tracer un polygone', icon: Pentagon },
   { id: 'text', name: 'Texte', hint: 'Annoter la figure', icon: Type },
   { id: 'eraser', name: 'Gomme', hint: 'Supprimer un objet', icon: Eraser },
@@ -499,6 +499,7 @@ function App() {
   const [useFixedProtractor, setUseFixedProtractor] = useState(false)
   const [instruments, setInstruments] = useState<InstrumentsState>({})
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [namePoints, setNamePoints] = useState(false)
   const [showGrid, setShowGrid] = useState(true)
   const [zoom, setZoom] = useState(0.82)
   const [message, setMessage] = useState('Importez un PDF ou commencez sur une feuille blanche A4.')
@@ -506,7 +507,7 @@ function App() {
   const [pendingTextPos, setPendingTextPos] = useState<{ x: number; y: number } | null>(null)
   const [textDraft, setTextDraft] = useState('')
 
-  const pointLabel = useMemo(() => String.fromCharCode(65 + shapes.filter((s) => s.type === 'point').length), [shapes])
+  const pointLabel = useMemo(() => String.fromCharCode(65 + shapes.filter((s) => s.type === 'point' && s.label).length), [shapes])
 
   const getPos = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current!
@@ -879,7 +880,7 @@ function App() {
       return
     }
     if (tool === 'point') {
-      setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: pos.x, y: pos.y, color, label: pointLabel }])
+      setShapes((items) => [...items, { id: crypto.randomUUID(), type: 'point', x: pos.x, y: pos.y, color, label: namePoints ? pointLabel : '' }])
       return
     }
     if (tool === 'polygon') {
@@ -1089,6 +1090,12 @@ function App() {
               ))}
             </select>
             <p className="mt-2 text-xs text-slate-400">{tools.find((t) => t.id === tool)?.hint}</p>
+            {tool === 'point' && (
+              <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-300">
+                <input type="checkbox" checked={namePoints} onChange={(e) => setNamePoints(e.target.checked)} className="h-4 w-4 accent-blue-500" />
+                Nommer les points (A, B, C…)
+              </label>
+            )}
             <p className="mb-2 mt-4 text-sm font-semibold text-slate-300">Afficher sur la page</p>
             <div className="grid grid-cols-3 gap-2">
               {([['ruler', Ruler], ['setSquare', TriangleRight], ['protractor', Gauge]] as const).map(([kind, Icon]) => (
