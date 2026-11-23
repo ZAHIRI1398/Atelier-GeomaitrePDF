@@ -28,6 +28,8 @@ import {
   Rows3,
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
+import Instruments from './Instruments'
+import type { InstrumentKind, InstrumentsState } from './Instruments'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
@@ -302,125 +304,6 @@ function drawRulerInstrument(ctx: CanvasRenderingContext2D, start: { x: number; 
   ctx.restore()
 }
 
-function drawSetSquareInstrument(ctx: CanvasRenderingContext2D, start: { x: number; y: number }, end: { x: number; y: number }, rotation: number = 0) {
-  const w = end.x - start.x
-  const h = end.y - start.y
-  if (Math.abs(w) < 12 || Math.abs(h) < 12) return
-  const sx = Math.sign(w) || 1
-  const sy = Math.sign(h) || 1
-  const inner = Math.min(Math.abs(w), Math.abs(h)) * 0.34
-  ctx.save()
-  ctx.translate(start.x, start.y)
-  ctx.rotate(rotation)
-  ctx.translate(-start.x, -start.y)
-  ctx.shadowColor = 'rgba(15, 23, 42, .18)'
-  ctx.shadowBlur = 10
-  ctx.fillStyle = 'rgba(14, 165, 233, .18)'
-  ctx.strokeStyle = 'rgba(2, 132, 199, .85)'
-  ctx.lineWidth = 3
-  ctx.beginPath()
-  ctx.moveTo(start.x, start.y)
-  ctx.lineTo(start.x + w, start.y)
-  ctx.lineTo(start.x, start.y + h)
-  ctx.closePath()
-  ctx.fill()
-  ctx.stroke()
-  ctx.shadowBlur = 0
-  ctx.fillStyle = 'rgba(255,255,255,.55)'
-  ctx.strokeStyle = 'rgba(2, 132, 199, .55)'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(start.x + sx * inner * 0.55, start.y + sy * inner * 0.55)
-  ctx.lineTo(start.x + sx * (inner + inner * 0.85), start.y + sy * inner * 0.55)
-  ctx.lineTo(start.x + sx * inner * 0.55, start.y + sy * (inner + inner * 0.85))
-  ctx.closePath()
-  ctx.fill()
-  ctx.stroke()
-  ctx.strokeStyle = '#0369a1'
-  ctx.lineWidth = 3
-  const marker = Math.min(24, Math.abs(w) / 4, Math.abs(h) / 4)
-  ctx.beginPath()
-  ctx.moveTo(start.x + sx * marker, start.y)
-  ctx.lineTo(start.x + sx * marker, start.y + sy * marker)
-  ctx.lineTo(start.x, start.y + sy * marker)
-  ctx.stroke()
-  ctx.font = '900 18px Inter, system-ui'
-  ctx.fillStyle = '#075985'
-  ctx.fillText('90°', start.x + sx * 12, start.y + sy * 42)
-  ctx.restore()
-}
-
-function drawProtractorInstrument(ctx: CanvasRenderingContext2D, center: { x: number; y: number }, pointer: { x: number; y: number }, fixedAngle: number | null, rotation: number = 0) {
-  const radius = Math.max(105, Math.min(210, distance(center.x, center.y, pointer.x, pointer.y)))
-  const raw = Math.atan2(pointer.y - center.y, pointer.x - center.x)
-  const angle = fixedAngle === null ? raw : (-fixedAngle * Math.PI) / 180
-  const degrees = Math.round(Math.abs((angle * 180) / Math.PI))
-  ctx.save()
-  ctx.translate(center.x, center.y)
-  ctx.rotate(rotation)
-  ctx.translate(-center.x, -center.y)
-  ctx.shadowColor = 'rgba(15, 23, 42, .18)'
-  ctx.shadowBlur = 10
-  ctx.fillStyle = 'rgba(168, 85, 247, .16)'
-  ctx.strokeStyle = 'rgba(126, 34, 206, .75)'
-  ctx.lineWidth = 3
-  ctx.beginPath()
-  ctx.arc(center.x, center.y, radius, Math.PI, 0)
-  ctx.lineTo(center.x - radius, center.y)
-  ctx.closePath()
-  ctx.fill()
-  ctx.stroke()
-  ctx.shadowBlur = 0
-  ctx.strokeStyle = '#6b21a8'
-  ctx.fillStyle = '#581c87'
-  ctx.font = '700 11px Inter, system-ui'
-  for (let deg = 0; deg <= 180; deg += 5) {
-    const a = Math.PI - (deg * Math.PI) / 180
-    const outerX = center.x + Math.cos(a) * radius
-    const outerY = center.y - Math.sin(a) * radius
-    const tick = deg % 30 === 0 ? 22 : deg % 10 === 0 ? 16 : 9
-    const innerX = center.x + Math.cos(a) * (radius - tick)
-    const innerY = center.y - Math.sin(a) * (radius - tick)
-    ctx.lineWidth = deg % 30 === 0 ? 2 : 1
-    ctx.beginPath()
-    ctx.moveTo(outerX, outerY)
-    ctx.lineTo(innerX, innerY)
-    ctx.stroke()
-    if (deg % 30 === 0) {
-      const tx = center.x + Math.cos(a) * (radius - 38)
-      const ty = center.y - Math.sin(a) * (radius - 38)
-      ctx.fillText(String(deg), tx - 8, ty + 4)
-    }
-  }
-  ctx.fillStyle = '#581c87'
-  ctx.beginPath()
-  ctx.arc(center.x, center.y, 5, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.strokeStyle = '#7e22ce'
-  ctx.lineWidth = 4
-  ctx.beginPath()
-  ctx.moveTo(center.x, center.y)
-  ctx.lineTo(center.x + Math.cos(angle) * radius, center.y + Math.sin(angle) * radius)
-  ctx.stroke()
-  // Draw arrowhead at the end of the pointer for clearer orientation
-  const tipX = center.x + Math.cos(angle) * radius
-  const tipY = center.y + Math.sin(angle) * radius
-  const arrowSize = Math.min(18, radius * 0.12)
-  ctx.fillStyle = '#7e22ce'
-  ctx.beginPath()
-  ctx.moveTo(tipX, tipY)
-  ctx.lineTo(tipX - Math.cos(angle - Math.PI / 6) * arrowSize, tipY - Math.sin(angle - Math.PI / 6) * arrowSize)
-  ctx.lineTo(tipX - Math.cos(angle + Math.PI / 6) * arrowSize, tipY - Math.sin(angle + Math.PI / 6) * arrowSize)
-  ctx.closePath()
-  ctx.fill()
-  ctx.beginPath()
-  ctx.arc(center.x, center.y, radius * 0.33, Math.min(0, angle), Math.max(0, angle))
-  ctx.stroke()
-  ctx.font = '900 18px Inter, system-ui'
-  ctx.fillText(`${Math.min(180, degrees)}°`, center.x + 14, center.y - 14)
-  ctx.restore()
-}
-
 function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, selected = false) {
   ctx.save()
   ctx.lineCap = 'round'
@@ -614,8 +497,8 @@ function App() {
   const [useFixedCompass, setUseFixedCompass] = useState(false)
   const [protractorAngle, setProtractorAngle] = useState(60)
   const [useFixedProtractor, setUseFixedProtractor] = useState(false)
-  const [setSquareRotation, setSetSquareRotation] = useState(0)
-  const [protractorRotation, setProtractorRotation] = useState(0)
+  const [instruments, setInstruments] = useState<InstrumentsState>({})
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [showGrid, setShowGrid] = useState(true)
   const [zoom, setZoom] = useState(0.82)
   const [message, setMessage] = useState('Importez un PDF ou commencez sur une feuille blanche A4.')
@@ -696,8 +579,6 @@ function App() {
         if (base) drawShape(ctx, base, true)
       }
       if (tool === 'ruler' && dragStart && toolPointer) drawRulerInstrument(ctx, dragStart, toolPointer, pxPerCm)
-      if (tool === 'setSquare' && dragStart && toolPointer) drawSetSquareInstrument(ctx, dragStart, toolPointer, setSquareRotation)
-      if (tool === 'protractor' && dragStart && toolPointer) drawProtractorInstrument(ctx, dragStart, toolPointer, useFixedProtractor ? protractorAngle : null, protractorRotation)
       if (tool === 'compass' && dragStart && preview?.type === 'circle') {
         const pointer = compassPointer ?? { x: dragStart.x + preview.r, y: dragStart.y }
         const currentAngle = Math.atan2(pointer.y - dragStart.y, pointer.x - dragStart.x)
@@ -753,7 +634,7 @@ function App() {
         setMessage(`Erreur d'affichage : ${err?.message ?? String(err)}`)
       }
     }
-  }, [bg, color, compassPointer, constructionBaseId, dragStart, pdfWords, polygonPoints, preview, protractorAngle, pxPerCm, readerBox, selectedId, selectedWordIds, shapes, showGrid, stage, strokeWidth, tool, toolPointer, useFixedProtractor, setSquareRotation, protractorRotation])
+  }, [bg, color, compassPointer, constructionBaseId, dragStart, pdfWords, polygonPoints, preview, pxPerCm, readerBox, selectedId, selectedWordIds, shapes, showGrid, stage, strokeWidth, tool, toolPointer])
 
   useEffect(() => {
     redraw()
@@ -765,29 +646,55 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const rotationStep = e.shiftKey ? 0.25 : 0.05
-      if (tool === 'setSquare') {
-        if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
-          e.preventDefault()
-          setSetSquareRotation((r) => r - rotationStep)
-        } else if (e.key === 'ArrowRight' || e.key === 'e' || e.key === 'E') {
-          e.preventDefault()
-          setSetSquareRotation((r) => r + rotationStep)
-        }
-      }
-      if (tool === 'protractor') {
-        if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
-          e.preventDefault()
-          setProtractorRotation((r) => r - rotationStep)
-        } else if (e.key === 'ArrowRight' || e.key === 'e' || e.key === 'E') {
-          e.preventDefault()
-          setProtractorRotation((r) => r + rotationStep)
-        }
-      }
+      if (e.target instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return
+      if (tool !== 'ruler' && tool !== 'setSquare' && tool !== 'protractor') return
+      const left = e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q'
+      const right = e.key === 'ArrowRight' || e.key === 'e' || e.key === 'E'
+      if (!left && !right) return
+      e.preventDefault()
+      const step = (e.shiftKey ? 15 : 1) * (left ? -1 : 1)
+      setInstruments((items) => {
+        const current = items[tool]
+        return current ? { ...items, [tool]: { ...current, rot: current.rot + step } } : items
+      })
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [tool])
+
+  // Pose l'instrument au milieu de la partie visible de la page
+  const showInstrument = (kind: InstrumentKind) => {
+    const canvas = canvasRef.current
+    const box = scrollRef.current
+    let center = { x: stage.width / 2, y: stage.height / 3 }
+    if (canvas && box) {
+      const c = canvas.getBoundingClientRect()
+      const v = box.getBoundingClientRect()
+      const top = Math.max(c.top, v.top, 0)
+      const bottom = Math.min(c.bottom, v.bottom, window.innerHeight)
+      const left = Math.max(c.left, v.left)
+      const right = Math.min(c.right, v.right)
+      center = {
+        x: (((left + right) / 2 - c.left) / c.width) * stage.width,
+        y: ((bottom > top ? (top + bottom) / 2 : c.top + c.height / 3) - c.top) / c.height * stage.height,
+      }
+    }
+    // L'origine n'est pas au milieu de l'instrument (bord gradué, angle droit, centre)
+    const shift = { ruler: { x: 0, y: -3 }, setSquare: { x: -6, y: 3.5 }, protractor: { x: 0, y: 3 } }[kind]
+    const x = Math.min(stage.width, Math.max(0, center.x + shift.x * pxPerCm))
+    const y = Math.min(stage.height, Math.max(0, center.y + shift.y * pxPerCm))
+    setInstruments((items) => (items[kind] ? items : { ...items, [kind]: { x, y, rot: 0 } }))
+  }
+
+  const hideInstrument = (kind: InstrumentKind) => {
+    setInstruments((items) => ({ ...items, [kind]: undefined }))
+    setTool((current) => (current === kind ? 'select' : current))
+  }
+
+  const chooseTool = (next: Tool) => {
+    setTool(next)
+    if (next === 'ruler' || next === 'setSquare' || next === 'protractor') showInstrument(next)
+  }
 
   const renderPage = useCallback(async (pdf: pdfjsLib.PDFDocumentProxy, pageNumber: number) => {
     const pdfPage = await pdf.getPage(pageNumber)
@@ -924,6 +831,8 @@ function App() {
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const pos = getPos(event)
+    // Le tracé continue même si le pointeur passe au-dessus d'un instrument
+    event.currentTarget.setPointerCapture(event.pointerId)
     if (tool === 'reader') {
       setReaderStart(pos)
       setReaderBox({ x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y })
@@ -1170,7 +1079,7 @@ function App() {
             <h2 className="mb-3 font-black text-white">Instruments</h2>
             <select 
               value={tool} 
-              onChange={(e) => setTool(e.target.value as Tool)}
+              onChange={(e) => { chooseTool(e.target.value as Tool); e.target.blur() }}
               className="w-full rounded-2xl border border-white/10 bg-slate-900/70 p-3 text-slate-300 hover:bg-slate-800 focus:border-blue-300 focus:outline-none"
             >
               {tools.map((item) => (
@@ -1180,6 +1089,19 @@ function App() {
               ))}
             </select>
             <p className="mt-2 text-xs text-slate-400">{tools.find((t) => t.id === tool)?.hint}</p>
+            <p className="mb-2 mt-4 text-sm font-semibold text-slate-300">Afficher sur la page</p>
+            <div className="grid grid-cols-3 gap-2">
+              {([['ruler', Ruler], ['setSquare', TriangleRight], ['protractor', Gauge]] as const).map(([kind, Icon]) => (
+                <button
+                  key={kind}
+                  aria-pressed={!!instruments[kind]}
+                  onClick={() => (instruments[kind] ? hideInstrument(kind) : showInstrument(kind))}
+                  className={`rounded-xl px-1 py-2 text-xs font-bold transition ${instruments[kind] ? 'bg-sky-500 text-white' : 'bg-slate-900 text-slate-300 hover:bg-slate-800'}`}
+                >
+                  <Icon className="mx-auto mb-1 h-5 w-5" />{tools.find((t) => t.id === kind)?.name}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-black/20 backdrop-blur">
@@ -1215,7 +1137,7 @@ function App() {
                 {useFixedProtractor ? 'Angle verrouillé' : 'Angle libre au glisser'}
               </button>
               <p className="mt-2 text-xs leading-relaxed text-slate-300">
-                La latte montre ses graduations en cm, l'équerre affiche un vrai triangle transparent, et le rapporteur mesure/construit un angle de 0° à 180°.
+                Les instruments affichés sur la page se déplacent en les glissant, se tournent avec le rond bleu et se ferment avec la croix rouge. Ils ne sont pas imprimés.
               </p>
             </div>
             <div className="mt-4 rounded-2xl border border-emerald-300/20 bg-emerald-500/10 p-3">
@@ -1271,9 +1193,9 @@ function App() {
               {tool === 'parallel' && <p className="mt-1 text-sm font-semibold text-emerald-200">Parallèle : 1) cliquez une droite de base, 2) cliquez le point par lequel la parallèle doit passer.</p>}
               {tool === 'perpendicular' && <p className="mt-1 text-sm font-semibold text-red-200">Perpendiculaire : 1) cliquez une droite de base, 2) cliquez le point par lequel la perpendiculaire doit passer.</p>}
               {tool === 'compass' && <p className="mt-1 text-sm font-semibold text-blue-200">Pointe sèche = premier clic. Mine = déplacement. Ouverture actuelle : {compassOpeningCm.toFixed(1)} cm.</p>}
-              {tool === 'ruler' && <p className="mt-1 text-sm font-semibold text-amber-200">Latte graduée : glissez pour aligner la règle et tracer un segment mesuré.</p>}
-              {tool === 'setSquare' && <p className="mt-1 text-sm font-semibold text-sky-200">Équerre : glissez pour poser le triangle transparent. Utilisez ←/→ ou Q/E pour tourner (Shift pour rotation rapide).</p>}
-              {tool === 'protractor' && <p className="mt-1 text-sm font-semibold text-purple-200">Rapporteur : centre au premier clic, glissez pour mesurer/construire l'angle. Utilisez ←/→ ou Q/E pour tourner (Shift pour rotation rapide). Angle actuel : {protractorAngle}°.</p>}
+              {tool === 'ruler' && <p className="mt-1 text-sm font-semibold text-amber-200">Latte : glissez la latte pour la déplacer, ou glissez sur la page pour tracer un segment mesuré. Pour tracer le long de la latte, choisissez Segment ou Droite.</p>}
+              {tool === 'setSquare' && <p className="mt-1 text-sm font-semibold text-sky-200">Équerre : glissez-la pour la déplacer, rond bleu (ou ←/→) pour la tourner, croix rouge pour la fermer. Pour tracer le long de l'équerre, choisissez Segment ou Droite. Glisser sur la page construit un triangle rectangle.</p>}
+              {tool === 'protractor' && <p className="mt-1 text-sm font-semibold text-purple-200">Rapporteur : glissez-le pour le déplacer, rond bleu (ou ←/→) pour le tourner, croix rouge pour le fermer. Glisser sur la page construit un angle. Angle actuel : {protractorAngle}°.</p>}
               {tool === 'polygon' && <p className="mt-1 text-sm font-semibold text-indigo-200">Polygone : cliquez pour ajouter des points. Cliquez sur le premier point (ou un point existant) pour fermer le polygone.</p>}
               {tool === 'text' && <p className="mt-1 text-sm font-semibold text-blue-200">Texte : cliquez sur la page pour choisir la position, tapez le texte dans la fenêtre qui s'ouvre, puis validez.</p>}
             </div>
@@ -1288,16 +1210,26 @@ function App() {
             </div>
           </div>
 
-          <div className="max-h-[78vh] overflow-auto rounded-2xl bg-slate-800 p-4">
-            <div className="mx-auto origin-top rounded bg-white shadow-2xl" style={{ width: stage.width * zoom, height: stage.height * zoom }}>
+          <div ref={scrollRef} className="max-h-[78vh] overflow-auto rounded-2xl bg-slate-800 p-4">
+            <div className="relative mx-auto origin-top rounded bg-white shadow-2xl" style={{ width: stage.width * zoom, height: stage.height * zoom }}>
               <canvas
                 ref={canvasRef}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
                 onPointerLeave={handlePointerUp}
                 className="block h-full w-full touch-none cursor-crosshair rounded"
                 style={{ width: stage.width * zoom, height: stage.height * zoom }}
+              />
+              <Instruments
+                instruments={instruments}
+                stage={stage}
+                pxPerCm={pxPerCm}
+                zoom={zoom}
+                bodyDraggable={tool === 'select' || tool === 'ruler' || tool === 'setSquare' || tool === 'protractor'}
+                onChange={(kind, state) => setInstruments((items) => (items[kind] ? { ...items, [kind]: state } : items))}
+                onClose={hideInstrument}
               />
             </div>
           </div>
